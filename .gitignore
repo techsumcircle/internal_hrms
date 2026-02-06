@@ -8,6 +8,7 @@ __pycache__/
 /media
 /staticfiles
 
+
 # Environment
 .env
 

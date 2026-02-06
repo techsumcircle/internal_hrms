@@ -13,7 +13,6 @@ class UserSerializer(serializers.ModelSerializer):
     
 
 class RegisterSerializer(serializers.ModelSerializer):
-    # password = serializers.CharField(write_only=True, min_length=6)
 
     class Meta:
         model = User
@@ -55,59 +54,6 @@ class RoleSerializer(serializers.ModelSerializer):
         model = Role
         fields = '__all__'
 
-# class employeeOTPRegisterSerializerDemoNew(serializers.ModelSerializer):
-    # status = serializers.ChoiceField(
-    #     choices=Employee.STATUS_CHOICES,
-    #     default='Pending',
-    #     required=False
-    # )
-    # employee_kyc = serializers.ChoiceField(
-    #     choices=Employee.KYC_CHOICES,
-    #     default='Pending',
-    #     required=False
-    # )
-    # wallet_balance = serializers.DecimalField(
-    #     max_digits=12,
-    #     decimal_places=2,
-    #     default=0,
-    #     required=False
-    # )
-    # employee_number = serializers.CharField(required=False)
-
-    # class Meta:
-    #     model = User
-    #     fields = [
-    #         'username', 'role',
-    #         # 'status', 'employee_kyc',
-    #         # 'wallet_balance', 'employee_number',
-    #         'password'
-    #     ]
-    #     extra_kwargs = {
-    #         'password': {'write_only': True, 'required': False}
-    #     }
-
-    # def create(self, validated_data):
-    #     mobile_number = self.context.get('mobile_number')
-    #     if not mobile_number:
-    #         raise serializers.ValidationError("Mobile number missing")
-
-        # status = validated_data.pop('status', 'Pending')
-        # employee_kyc = validated_data.pop('employee_kyc', 'Pending')
-        # wallet_balance = validated_data.pop('wallet_balance', 0)
-        # employee_number = validated_data.pop('employee_number')
-
-        # password = validated_data.pop('password', '123456')
-        # validated_data['password'] = make_password(password)
-
-        # user = User.objects.create(**validated_data)
-
-        # Employee.objects.create(
-        #     user=user,
-        #     mobile_number=mobile_number,
-        #     employee_number=employee_number
-        # )
-
-        # return user
 class ForgetPasswordSerializer(serializers.Serializer):
     email = serializers.CharField()
     mobile_number = serializers.CharField(read_only=True)
@@ -120,12 +66,13 @@ class EmployeeSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class EmployeeEmergencyContactSerializer(serializers.ModelSerializer):
-    employee = serializers.PrimaryKeyRelatedField(queryset=Employee.objects.all())
+    employee = serializers.StringRelatedField(read_only=True)
     class Meta:
         model = EmployeeEmergencyContact
         fields = '__all__'
 
 class EmployeeAddressIdentitySerializer(serializers.ModelSerializer):
+    employee = serializers.StringRelatedField(read_only=True)
     class Meta:
         model = EmployeeAddressIdentity
         fields = '__all__'
@@ -139,48 +86,53 @@ class AttendanceSerializer(serializers.ModelSerializer):
         model = Attendance
         fields = "__all__"
 
-class LeaveRequestSerializer(serializers.ModelSerializer):
+class WorkFromHomeRequestSerializer(serializers.ModelSerializer):
+    employee = serializers.StringRelatedField(read_only=True)
     class Meta:
-        model = LeaveRequest
+        model = WorkFromHomeRequest
         fields = '__all__'
+        read_only_fields = ["employee", "total_days", "status"]
 
-
-class LeaveTypeSerializer(serializers.ModelSerializer):
+class WorkFromHomeApprovalSerializer(serializers.ModelSerializer):
+    wfh_request = serializers.StringRelatedField(read_only=True)
     class Meta:
-        model = LeaveType
+        model = WorkFromHomeApproval
         fields = '__all__'
+        fields = [
+            "id",
+            "wfh_request",
+            "status",
+            "remarks",
+            "approved_date"
+        ]
+        read_only_fields = ["approved_date"]
 
-class EmployeeLeaveBalanceSerializer(serializers.ModelSerializer):
-    leave_type = LeaveTypeSerializer(read_only=True)
-
-    class Meta:
-        model = EmployeeLeaveBalance
-        fields = '__all__'
-
-class LeaveApplicationSerializer(serializers.ModelSerializer):
-    employee = serializers.ReadOnlyField(source='employee.id')
-
-    class Meta:
-        model = LeaveApplication
-        fields = '__all__'
-        read_only_fields = ('status', 'manager_approved', 'hr_approved', 'applied_date')
-
-# class SalarySerializer(serializers.ModelSerializer):
+# class LeaveRequestSerializer(serializers.ModelSerializer):
 #     class Meta:
-#         model = Salary
+#         model = LeaveApplication
 #         fields = '__all__'
 
-# class HolidaySerializer(serializers.ModelSerializer):
+
+# class LeaveTypeSerializer(serializers.ModelSerializer):
+#     # employee = serializers.StringRelatedField(read_only=True)
 #     class Meta:
-#         model = Holiday
+#         model = LeaveType
+#         fields = '__all__'
+#         # read_only_fields = ["employee"]
+
+# class EmployeeLeaveBalanceSerializer(serializers.ModelSerializer):
+#     leave_type = LeaveTypeSerializer(read_only=True)
+
+#     class Meta:
+#         model = EmployeeLeaveBalance
 #         fields = '__all__'
 
-# class WorkFromHomeRequestSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = WorkFromHomeRequest
-#         fields = '__all__'
+# class LeaveApplicationSerializer(serializers.ModelSerializer):
+#     employee = serializers.StringRelatedField(read_only=True)
+#     leave_type = serializers.StringRelatedField(read_only=True)
 
-# class WorkFromHomeApprovalSerializer(serializers.ModelSerializer):
 #     class Meta:
-#         model = WorkFromHomeApproval
+#         model = LeaveApplication
 #         fields = '__all__'
+#         read_only_fields = ("employee",'status', 'manager_approved', 'hr_approved', 'applied_date')
+

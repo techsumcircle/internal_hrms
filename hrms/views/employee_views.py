@@ -14,370 +14,55 @@ from hrms.serializers.emp_serializers import *
 from rest_framework_simplejwt.tokens import RefreshToken 
 from django.utils.crypto import get_random_string
 from django.contrib.auth.hashers import make_password, check_password
+from django.shortcuts import get_object_or_404
+from django.contrib.postgres.search import SearchVector
+from rest_framework.parsers import MultiPartParser, FormParser
 # from django.contrib.auth.models import User
 # from django.contrib.auth import authenticate
 # from crm.models import()
 # from crm.serializer import ()
 # from crm.views.permission import PermissionCheckView
 
-class UserAPIView(APIView):
+
+class RoleAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
-            user = request.user
-            if request.user.role and request.user.role.name  not in ['hr', 'admin']:
-                   return Response({'error': 'You do not have permission to view all users.'}, status=status.HTTP_403_FORBIDDEN)
-            user = User.objects.all()
-            serializer = UserSerializer(user, many=True)
+            role = Role.objects.all()
+            serializer = RoleSerializer(role, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-class ForgetPasswordView(APIView):
-    """
-    Unified forget password API
-    Steps:
-    1. Send OTP to email or mobile.
-    2. Verify OTP.
-    3. Reset password.
-    """
-
-    def post(self, request):
-        method = request.data.get("method")       # 'email' or 'mobile'
-        identifier = request.data.get("identifier")  # email or mobile
-        otp = request.data.get("otp")
-        new_password = request.data.get("new_password")
-        confirm_password = request.data.get("confirm_password")
-
-        if not method or not identifier:
-            return Response({"error": "Method and identifier are required."}, status=400)
-
-        # Step 1: Generate & send OTP
-        if not otp:
-            generated_otp = str(random.randint(100000, 999999))
-
-            if method == "email":
-                # Remove previous OTP
-                EmailOTP.objects.filter(email=identifier).delete()
-                # Save OTP
-                EmailOTP.objects.create(email=identifier, otp=generated_otp, created_at=datetime.now())
-
-                # Send email
-                subject = "Your OTP for Password Reset"
-                message = f"Your OTP is {generated_otp}. It is valid for 10 minutes."
-                try:
-                    send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [identifier])
-                    return Response({"message": "OTP sent to email."}, status=200)
-                except Exception as e:
-                    return Response({"error": "Failed to send email.", "details": str(e)}, status=500)
-
-            elif method == "mobile":
-                # Remove previous OTP
-                MobileOTP.objects.filter(mobile_number=identifier).delete()
-                # Save OTP
-                MobileOTP.objects.create(mobile_number=identifier, otp=generated_otp, created_at=datetime.now())
-
-                # Send SMS via Vasbay
-                sms_message = f"Your OTP is {generated_otp}. Valid for 10 mins. SumCircle"
-                params = {
-                    "usersName": settings.VASBAY_USERNAME,
-                    "key": settings.VASBAY_API_KEY,
-                    "route": 2,
-                    "message": sms_message,
-                    "numbers": identifier,
-                    "senderId": settings.VASBAY_SENDER_ID,
-                    "entityId": settings.VASBAY_ENTITY_ID,
-                    "contentId": settings.VASBAY_CONTENT_ID
-                }
-                try:
-                    response = requests.get(settings.VASBAY_API_URL, params=params, timeout=10)
-                    data = response.json()
-                    sms_status = ""
-                    msg = data.get("msg")
-                    if isinstance(msg, dict):
-                        response_block = msg.get("response")
-                        if isinstance(response_block, dict):
-                            sms_status = response_block.get("0", {}).get("status", "")
-                    elif isinstance(msg, str):
-                        sms_status = msg
-
-                    if sms_status in ["Sent", "Delivered"]:
-                        return Response({"message": "OTP sent to mobile."}, status=200)
-                    else:
-                        return Response({"error": "OTP not delivered.", "status": sms_status}, status=500)
-                except Exception as e:
-                    return Response({"error": "Failed to send OTP.", "details": str(e)}, status=500)
-            else:
-                return Response({"error": "Invalid method. Use 'email' or 'mobile'."}, status=400)
-
-        # Step 2: OTP verify + reset password
-        if otp:
-            if not new_password or not confirm_password:
-                return Response({"message": "OTP verified. Now provide new_password and confirm_password."}, status=200)
-
-            if new_password != confirm_password:
-                return Response({"error": "Passwords do not match."}, status=400)
-
-            # Verify OTP
-            otp_obj = None
-            try:
-                if method == "email":
-                    otp_obj = EmailOTP.objects.get(email=identifier)
-                else:
-                    otp_obj = MobileOTP.objects.get(mobile_number=identifier)
-            except (EmailOTP.DoesNotExist, MobileOTP.DoesNotExist):
-                return Response({"error": "OTP not found."}, status=400)
-
-            # Check expiry
-            if timezone.now() > otp_obj.created_at + timedelta(minutes=10):
-                return Response({"error": "OTP expired."}, status=400)
-
-            if otp_obj.otp != otp:
-                return Response({"error": "Invalid OTP."}, status=400)
-
-            # Update password
-            try:
-                if method == "email":
-                    user = User.objects.get(email=identifier)
-                else:
-                    user = User.objects.get(mobile_number=identifier)
-                user.password = make_password(new_password)
-                user.save()
-                otp_obj.delete()
-                return Response({"message": "Password reset successfully."}, status=200)
-            except User.DoesNotExist:
-                return Response({"error": "User not found."}, status=404)
-
-class VerifyOTPAndRegisterView(APIView):
-
-    def post(self, request):
-        email = request.data.get('email')
-        otp = request.data.get('otp')
-
-        if not (email and otp):
-            return Response({"error": "Email and OTP are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            otp_obj = EmailOTP.objects.get(email=email)
-            if otp_obj.is_expired():
-                return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
-            if otp_obj.otp != otp:
-                return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
-        except EmailOTP.DoesNotExist:
-            return Response({"error": "OTP not found for this email."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            employee_role = Role.objects.get(name__iexact='Employee')
-        except Role.DoesNotExist:
-            return Response({"error": "Employee role not found."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        request.data['role'] = employee_role.id
-
-        last_employee = User.objects.order_by('-id').first()
-        if last_employee and last_employee.employee_number:
-            try:
-                last_number = int(last_employee.employee_number.replace('GA-', ''))
-                employee_number = f"GA-{last_number + 1:04d}"
-            except ValueError:
-                employee_number = "GA-0001"
-        else:
-            employee_number = "GA-0001"
-
-        request.data['employee_number'] = employee_number
-
-        serializer = UserSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.save()
-            otp_obj.delete()
-
-            return Response({
-                'message': 'User registered successfully.',
-                'user': {
-                    'username': user.username,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'email': user.email,
-                    'role': user.role.name if user.role else None,
-                    'employee_number': employee_number
-                }
-            }, status=status.HTTP_201_CREATED)
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-class SendMobileOTPRegistrationLogin(APIView):
-    def post(self, request):
-        # user = request.user
-        mobile_number = request.data.get("mobile_number")
         
-        if not mobile_number:
-            return Response({"error": "Mobile number is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Generate OTP
-        otp = str(random.randint(100000, 999999))
-
-        # Remove previous OTPs
-        MobileOTP.objects.filter(mobile_number=mobile_number).delete()
-
-        # Save new OTP
-        MobileOTP.objects.create(mobile_number=mobile_number, otp=otp)
-
-        # SMS Content
-        message = f"OTP for Sum Circle Password Reset and Login is {otp}. This OTP will be valid for 10 mins. SumCircle"
-
-        params = {
-            "usersName": settings.VASBAY_USERNAME,
-            "key": settings.VASBAY_API_KEY,
-            "route": 2,
-            "message": message,
-            "numbers": mobile_number,
-            "senderId": settings.VASBAY_SENDER_ID,
-            "entityId": settings.VASBAY_ENTITY_ID,
-            "contentId": settings.VASBAY_CONTENT_ID
-        }
-
+    def post(self, request):
         try:
-            response = requests.get(settings.VASBAY_API_URL, params=params)
-
-            if response.status_code == 200:
-                data = response.json()
-                sms_status = data.get("msg", {}).get("response", {}).get("0", {}).get("status", "")
-                # sms_status = ""
-                # msg = data.get("msg")
-                
-                # if isinstance(msg, dict):
-                #     response_block = msg.get("response")
-                #     if isinstance(response_block, dict):
-                #         sms_status = response_block.get("0", {}).get("status", "")
-                # elif isinstance(msg, str):
-                #     sms_status = msg   # fallback when API returns string
-
-                if sms_status in ["Sent", "Delivered"]:
-                    return Response({"message": "OTP sent successfully."}, status=status.HTTP_200_OK)
-                else:
-                    return Response({"error": "OTP not delivered.", "status": sms_status, "details": data}, status=500)
-
-            return Response({"error": "Failed to contact SMS API", "details": response.text}, status=500)
-
+            serializer = RoleSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({"error": "An error occurred while sending OTP.", "details": str(e)}, status=500)
-
-import uuid
-
-def generate_uuid_username():
-    return f"user_{uuid.uuid4().hex}"
-
-# class EmployeeVerifyOTPAndRegisterLoginView(APIView):
-
-
-#     def post(self, request):
-#         mobile_number = request.data.get('mobile_number')
-#         otp = request.data.get('otp')
-
-#         if not (mobile_number and otp):
-#             return Response(
-#                 {"error": "Mobile number and OTP are required."},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
-#         # Fetch OTP
-#         otp_record = MobileOTP.objects.filter(mobile_number=mobile_number).first()
-#         if not otp_record:
-#             return Response({"error": "OTP expired or not found."}, status=400)
-
-#         # Check expiration
-#         if timezone.now() - otp_record.created_at > timedelta(minutes=10):
-#             otp_record.delete()
-#             return Response({"error": "OTP has expired."}, status=400)
-
-#         # Match OTP
-#         if otp != otp_record.otp:
-#             return Response({"error": "Invalid OTP."}, status=400)
-
-#         otp_record.delete()
-
-#         # Existing employee → login
-#         employee = Employee.objects.filter(mobile_number=mobile_number).first()
-#         if employee:
-#             user = employee.user
-#             refresh = RefreshToken.for_user(user)
-#             return Response({
-#                 "message": "Login successful.",
-#                 "is_new_user": False,
-#                 "access_token": str(refresh.access_token),
-#                 "refresh_token": str(refresh),
-#                 "employee_id": employee.id,
-#                 "employee_kyc": employee.employee_kyc,
-#                 "username": user.username,
-#                 "first_name": user.first_name,
-#                 "last_name": user.last_name,
-#                 "email": user.email,
-#                 "role": user.role.name if user.role else None
-#             }, status=200)
-
-#         # New employee → register + login
-#         try:
-#             employee_role = Role.objects.get(name__iexact='Employee')
-#         except Role.DoesNotExist:
-#             return Response({"error": "Employee role not found."}, status=500)
-
-#         # # Generate employee number
-#         # last_employee = employee.objects.order_by('-id').first()
-#         # if last_employee and last_employee.employee_number:
-#         #     try:
-#         #         last_num = int(last_employee.employee_number.replace('RD-', ''))
-#         #         employee_number = f"RD-{last_num + 1:03d}"
-#         #     except:
-#         #         employee_number = "RD-001"
-#         # else:
-#         #     employee_number = "RD-001"
-
-#         last_employee = Employee.objects.order_by('-id').first()
-#         if last_employee and last_employee.employee_number:
-#             try:
-#                 last_num = int(last_employee.employee_number.replace('RD', ''))
-#                 employee_number = f"RD{last_num + 1:03d}"
-#             except ValueError:
-#                 employee_number = "RD001"
-#         else:
-#             employee_number = "RD001"
-
-#         register_payload = {
-#             "username": generate_uuid_username(),  # UUID username
-#             "role": employee_role.id,
-#             "employee_number": employee_number
-#         }
-
-#         # PASS CONTEXT HERE (THIS FIXES THE ERROR)
-#         serializer = EmployeeOTPRegisterSerializerDemoNew(
-#             data=register_payload,
-#             context={
-#                 "mobile_number": mobile_number
-#             }
-#         )
-#         serializer.is_valid(raise_exception=True)
-#         user = serializer.save()
-
-#         employee = Employee.objects.get(user=user)
-
-#         bronze_category = get_object_or_404(Category, category_name__iexact="Bronze")
-#         employee.category = bronze_category
-#         employee.save()
-
-#         refresh = RefreshToken.for_user(user)
-
-#         return Response({
-#             "message": "Registration & Login successful.",
-#             "is_new_user": True,
-#             "access_token": str(refresh.access_token),
-#             "refresh_token": str(refresh),
-#             "employee_id": employee.id,
-#             "employee_kyc": employee.employee_kyc,
-#             "first_name": user.first_name,
-#             "last_name": user.last_name,
-#             "email": user.email,
-#             "role": user.role.name if user.role else None
-#         }, status=201)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    def put(self, request, pk):
+        try:
+            role = Role.objects.get(id=pk)
+            serializer = RoleSerializer(role, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Role.DoesNotExist:
+            return Response({'error': 'Role does not Exists'}, status=status.HTTP_404_NOT_FOUND)
+        
+    def delete(self, request, pk):
+        try:
+            role = Role.objects.get(id=pk)
+            role.delete()
+            return Response({'message': 'Role deleted successfully'}, status=status.HTTP_200_OK)
+        except Role.DoesNotExist:
+            return Response({'error': 'Role does not Exists'}, status=status.HTTP_404_NOT_FOUND)
 
 class RegisterAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -456,82 +141,184 @@ class LoginAPIView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
  
-class RoleAPIView(APIView):
+
+class UserAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
-            role = Role.objects.all()
-            serializer = RoleSerializer(role, many=True)
+            user = request.user
+            if request.user.role and request.user.role.name not in ['HR', 'ADMIN']:
+                   return Response({'error': 'You do not have permission to view all users.'}, status=status.HTTP_403_FORBIDDEN)
+            user = User.objects.all()
+            serializer = UserSerializer(user, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-    def post(self, request):
-        try:
-            serializer = RoleSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-    def put(self, request, pk):
-        try:
-            role = Role.objects.get(id=pk)
-            serializer = RoleSerializer(role, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_200_OK)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Role.DoesNotExist:
-            return Response({'error': 'Role does not Exists'}, status=status.HTTP_404_NOT_FOUND)
-        
-    def delete(self, request, pk):
-        try:
-            role = Role.objects.get(id=pk)
-            role.delete()
-            return Response({'message': 'Role deleted successfully'}, status=status.HTTP_200_OK)
-        except Role.DoesNotExist:
-            return Response({'error': 'Role does not Exists'}, status=status.HTTP_404_NOT_FOUND)
 
 
-class ForgetPasswordAPIView(APIView):
-    permission_classes = []
+class ForgetPasswordView(APIView):
+    """
+    Unified forget password API
+    Steps:
+    1. Send OTP to email or mobile.
+    2. Verify OTP.
+    3. Reset password.
+    """
 
     def post(self, request):
-        try:
-            serializer = ForgetPasswordSerializer(data=request.data)
-            serializer.is_valid()
+        method = request.data.get("method")       # 'email' or 'mobile'
+        email_id = request.data.get("email_id")  # email or mobile
+        otp = request.data.get("otp")
+        new_password = request.data.get("new_password")
+        confirm_password = request.data.get("confirm_password")
 
-    
-            email = serializer.validated_data['email']
-            mobile_number = serializer.validated_data['mobile_number']
-            new_password = serializer.validated_data['new_password']
-            confirm_password = serializer.validated_data['confirm_password']
+        email = User.objects.annotate(search=SearchVector('email')).filter(search=email_id)
+        
+        if not method or not email_id:
+            return Response({"error": "Method and email_id are required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not email.exists():
+            return Response({"error": "Given email ID does not exist"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Step 1: Generate & send OTP
+        if not otp:
+            generated_otp = str(random.randint(100000, 999999))
+
+            if method == "email":
+                # Remove previous OTP
+                EmailOTP.objects.filter(email=email_id).delete()
+                # Save OTP
+                EmailOTP.objects.create(email=email_id, otp=generated_otp, created_at=datetime.now())
+
+                # Send email
+                subject = "Your OTP for Password Reset"
+                message = f"Your OTP is {generated_otp}. It is valid for 10 minutes."
+                try:
+                    send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email_id])
+                    return Response({"message": "OTP sent to email."}, status=status.HTTP_200_OK)
+                except Exception as e:
+                    return Response({"error": "Failed to send email.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            elif method == "mobile":
+                # Remove previous OTP
+                MobileOTP.objects.filter(mobile_number=email_id).delete()
+                # Save OTP
+                MobileOTP.objects.create(mobile_number=email_id, otp=generated_otp, created_at=datetime.now())
+
+                # Send SMS via Vasbay
+                sms_message = f"Your OTP is {generated_otp}. Valid for 10 mins. SumCircle"
+                params = {
+                    "usersName": settings.VASBAY_USERNAME,
+                    "key": settings.VASBAY_API_KEY,
+                    "route": 2,
+                    "message": sms_message,
+                    "numbers": email_id,
+                    "senderId": settings.VASBAY_SENDER_ID,
+                    "entityId": settings.VASBAY_ENTITY_ID,
+                    "contentId": settings.VASBAY_CONTENT_ID
+                }
+                try:
+                    response = requests.get(settings.VASBAY_API_URL, params=params, timeout=10)
+                    data = response.json()
+                    sms_status = ""
+                    msg = data.get("msg")
+                    if isinstance(msg, dict):
+                        response_block = msg.get("response")
+                        if isinstance(response_block, dict):
+                            sms_status = response_block.get("0", {}).get("status", "")
+                    elif isinstance(msg, str):
+                        sms_status = msg
+
+                    if sms_status in ["Sent", "Delivered"]:
+                        return Response({"message": "OTP sent to mobile."}, status=status.HTTP_200_OK)
+                    else:
+                        return Response({"error": "OTP not delivered.", "status": sms_status}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                except Exception as e:
+                    return Response({"error": "Failed to send OTP.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            else:
+                return Response({"error": "Invalid method. Use 'email' or 'mobile'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Step 2: OTP verify + reset password
+        if otp:
+            if not new_password or not confirm_password:
+                return Response({"message": "OTP verified. Now provide new_password and confirm_password."}, status=status.HTTP_200_OK)
 
             if new_password != confirm_password:
-                raise serializers.ValidationError("Passwords do not match", code="password_mismatch")
-            # return serializer.validated_data
-    
-            mobile_number = User.objects.get(mobile_number=mobile_number)
+                return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
 
+            # Verify OTP
+            otp_obj = None
             try:
-                user = User.objects.get(email=email)
+                if method == "email":
+                    otp_obj = EmailOTP.objects.get(email=email_id)
+                else:
+                    otp_obj = MobileOTP.objects.get(mobile_number=email_id)
+            except (EmailOTP.DoesNotExist, MobileOTP.DoesNotExist):
+                return Response({"error": "OTP not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check expiry
+            if timezone.now() > otp_obj.created_at + timedelta(minutes=10):
+                return Response({"error": "OTP expired."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if otp_obj.otp != otp:
+                return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Update password
+            try:
+                if method == "email":
+                    user = User.objects.get(email=email_id)
+                else:
+                    user = User.objects.get(mobile_number=email_id)
+                user.password = make_password(new_password)
+                user.save()
+                otp_obj.delete()
+                return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
             except User.DoesNotExist:
-                return Response(
-                    {"error": "Email not found"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
+                return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+# class ForgetPasswordAPIView(APIView):
+#     permission_classes = []
+
+#     def post(self, request):
+#         try:
+#             serializer = ForgetPasswordSerializer(data=request.data)
+#             serializer.is_valid()
+
     
-            user.set_password(new_password)
-            user.save()
+#             email = serializer.validated_data['email']
+#             mobile_number = serializer.validated_data['mobile_number']
+#             new_password = serializer.validated_data['new_password']
+#             confirm_password = serializer.validated_data['confirm_password']
+
+#             if new_password != confirm_password:
+#                 raise serializers.ValidationError("Passwords do not match", code="password_mismatch")
+#             # return serializer.validated_data
     
-            return Response({"message": "Password reset successfully"}, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+#             mobile_number = User.objects.get(mobile_number=mobile_number)
+
+#             try:
+#                 user = User.objects.get(email=email)
+#             except User.DoesNotExist:
+#                 return Response(
+#                     {"error": "Email not found"},
+#                     status=status.HTTP_404_NOT_FOUND
+#                 )
     
+#             user.set_password(new_password)
+#             user.save()
+    
+#             return Response({"message": "Password reset successfully"}, status=status.HTTP_200_OK)
+#         except Exception as e:
+#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+class LogoutApiView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        request.user.access_token.delete()
+
+        return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
+ 
 class EmployeeApiView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
@@ -606,8 +393,10 @@ class EmployeeEmergencyContactView(APIView):
         #     serializer.save()
         #     return Response(serializer.data, status=status.HTTP_201_CREATED)
         # return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 class EmployeeAddressIdentityView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = (MultiPartParser, FormParser)
     def get(self, request):
         try:
             document = EmployeeAddressIdentity.objects.all()
@@ -617,7 +406,9 @@ class EmployeeAddressIdentityView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request):
+        parser_classes = (MultiPartParser, FormParser)
         try:
+
             employee = Employee.objects.get(user=request.user)
             serializer = EmployeeAddressIdentitySerializer(data=request.data, partial=True)
             if serializer.is_valid():
@@ -626,14 +417,7 @@ class EmployeeAddressIdentityView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class LogoutApiView(APIView):
-    permission_classes = [IsAuthenticated]
-    def post(self, request):
-        request.user.access_token.delete()
-
-        return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
-    
+   
 class AttendanceApiView(APIView):
     # permission_classes = [IsAuthenticated]
 
@@ -712,12 +496,12 @@ class AttendanceApiView(APIView):
                         minutes=check_out_time.minute,
                         seconds=check_out_time.second,
                     )
-                    total_duration = check_out_time_total - check_in_time_total
+                total_duration = check_out_time_total - check_in_time_total
         
-                    if total_duration >= FULL_DAY_HOURS:
-                        status_value = "PRESENT"
-                    elif total_duration > timedelta(0) and total_duration < FULL_DAY_HOURS:
-                        status_value = "HALF_DAY"
+                if total_duration >= FULL_DAY_HOURS:
+                    status_value = "PRESENT"
+                elif total_duration > timedelta(0) and total_duration < FULL_DAY_HOURS:
+                    status_value = "HALF_DAY"
                     
         
                 attendance, created = Attendance.objects.update_or_create(
@@ -738,67 +522,9 @@ class AttendanceApiView(APIView):
         except Exception as e:
                 return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# class LeaveRequestView(APIView):
-    # def get(self, request):
-    #     try:
-    #         session = LeaveRequest.objects.all()
-    #         serializer = LeaveRequestSerializer(session, many = True)
-    #         return Response(serializer.data, status=status.HTTP_200_OK)
-    #     except Exception as e:
-    #         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def post(self, request):
-#         serializer = LeaveRequestSerializer(data=request.data)
-#         if serializer.is_valid():
-#             serializer.save()
-#             return Response(serializer.data, status=status.HTTP_201_CREATED)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-# class LeaveTypeViewSet(viewsets.ModelViewSet):
-#     queryset = LeaveType.objects.all()
-#     serializer_class = LeaveTypeSerializer
-#     permission_classes = [permissions.IsAdminUser]
-
-
-# class EmployeeLeaveBalanceViewSet(viewsets.ModelViewSet):
-#     serializer_class = EmployeeLeaveBalanceSerializer
-#     permission_classes = [permissions.IsAuthenticated]
-
-#     def get_queryset(self):
-#         return EmployeeLeaveBalance.objects.filter(employee=self.request.user)
-    
-# class LeaveApplicationViewSet(viewsets.ModelViewSet):
-#     serializer_class = LeaveApplicationSerializer
-#     permission_classes = [permissions.IsAuthenticated]
-
-#     def get_queryset(self):
-#         user = self.request.user
-#         return LeaveApplication.objects.filter(employee=user)
-
-#     def perform_create(self, serializer):
-#         serializer.save(employee=self.request.user)
-
-# class LeaveApprovalViewSet(viewsets.ViewSet):
-#     permission_classes = [permissions.IsAuthenticated]
-
-#     @action(detail=True, methods=['post'])
-#     def manager_approve(self, request, pk=None):
-#         leave = LeaveApplication.objects.get(pk=pk)
-#         leave.manager_approved = True
-#         leave.status = 'PENDING'
-#         leave.save()
-#         return Response({"message": "Manager approved"})
-
-#     @action(detail=True, methods=['post'])
-#     def hr_approve(self, request, pk=None):
-#         leave = LeaveApplication.objects.get(pk=pk)
-#         leave.hr_approved = True
-#         leave.status = 'APPROVED'
-#         leave.save()
-#         return Response({"message": "HR approved"})
-
 # class WorkFromHomeRequestView(APIView):
+#     permission_classes = [IsAuthenticated]
+
 #     def get(self, request):
 #         try:
 #             session = WorkFromHomeRequest.objects.all()
@@ -807,14 +533,52 @@ class AttendanceApiView(APIView):
 #         except Exception as e:
 #             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-#     def post(self, request):
-#         serializer = WorkFromHomeRequestSerializer(data=request.data)
-#         if serializer.is_valid():
-#             serializer.save()
+#     def post(self, request, *args, **kwargs):
+#         try:
+#             user = request.user
+#             serializer = WorkFromHomeRequestSerializer(data=request.data)
+#             serializer.is_valid(raise_exception=True)
+
+#             employee = Employee.objects.get(user=request.user)
+#             print(employee)
+
+#             from_date = serializer.validated_data.get('from_date')
+#             to_date = serializer.validated_data.get('to_date')
+#             reason = serializer.validated_data.get('reason')
+
+#             if from_date is None or to_date is None:
+#                 return Response(
+#                     {"error": "from_date and to_date are required"},
+#                     status=status.HTTP_400_BAD_REQUEST
+#                 )
+
+#             if to_date < from_date:
+#                 return Response(
+#                     {"error": "to_date cannot be before from_date"},
+#                     status=status.HTTP_400_BAD_REQUEST
+#                 )
+
+#             total_days = (to_date - from_date).days + 1
+
+
+#             # session = WorkFromHomeRequest.objects.filter(employee=employee)
+            
+#             WFH_Request = WorkFromHomeRequest.objects.create(
+#                 employee=employee,
+#                 from_date=from_date,
+#                 to_date=to_date,
+#                 total_days=total_days,
+#                 reason=reason,
+#                 status='pending'
+#             )
+#             serializer = WorkFromHomeRequestSerializer(WFH_Request)
 #             return Response(serializer.data, status=status.HTTP_201_CREATED)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#         except:
+#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # class WorkFromHomeApprovalView(APIView):
+#     permission_classes = [IsAuthenticated]
+
 #     def get(self, request):
 #         try:
 #             session = WorkFromHomeApproval.objects.all()
@@ -830,54 +594,177 @@ class AttendanceApiView(APIView):
 #             return Response(serializer.data, status=status.HTTP_201_CREATED)
 #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# class HolidayView(APIView):
-#     def get(self, request):
-#         try:
-#             session = Holiday.objects.all()
-#             serializer = HolidaySerializer(session, many = True)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+class WorkFromHomeRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            employee = Employee.objects.get(user=request.user)
+        except Employee.DoesNotExist:
+            return Response({"error": "Employee profile not found for this user"}, status=status.HTTP_400_BAD_REQUEST)
+    
+        sessions = WorkFromHomeRequest.objects.filter(employee=employee)
+        serializer = WorkFromHomeRequestSerializer(sessions, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = WorkFromHomeRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        employee = Employee.objects.get(user=request.user)
+
+        from_date = serializer.validated_data["from_date"]
+        to_date = serializer.validated_data["to_date"]
+        reason = serializer.validated_data.get("reason")
+
+        if to_date < from_date:
+            return Response({"error": "to_date cannot be before from_date"}, status=status.HTTP_400_BAD_REQUEST)
+
+        total_days = (to_date - from_date).days + 1
+
+        #  Rule: Friday WFH restriction
+        if from_date.weekday() == 4:
+            return Response({"error": "Friday WFH is restricted"},status=status.HTTP_400_BAD_REQUEST)
+
+        #  Rule: Bulk WFH
+        if total_days >= 2:
+            approval_type = "SPECIAL"
+        else:
+            approval_type = "NORMAL"
+
+        wfh = WorkFromHomeRequest.objects.create(
+            employee=employee,
+            from_date=from_date,
+            to_date=to_date,
+            total_days=total_days,
+            reason=reason,
+            status="PENDING",
+            approval_type=approval_type
+        )
+
+        return Response(WorkFromHomeRequestSerializer(wfh).data, status=status.HTTP_201_CREATED)
+
+class WorkFromHomeApprovalView(APIView):
+    permission_classes = [IsAuthenticated]
+
+
+    def post(self, request):
+        serializer = WorkFromHomeApprovalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        role = user.role
+
+        wfh_request = get_object_or_404(WorkFromHomeRequest,id=request.data.get("wfh_request_id"))
+
+        # wfh_request = WorkFromHomeRequest.objects.get(employee__user=request.user)
+        status_value = serializer.validated_data["status"]
+
+        # RULE 1: SPECIAL approval → ADMIN only
+        if wfh_request.approval_type == "SPECIAL" and role.name != "ADMIN":
+            return Response({"error": "Bulk WFH requests require ADMIN approval"},status=status.HTTP_403_FORBIDDEN)
+
+        if wfh_request.approval_type == "SPECIAL" and status_value == "APPROVED":
+            return Response()
+
+        # RULE 2: NORMAL approval → ADMIN or HR
+        if wfh_request.approval_type == "NORMAL" and role.name != "HR":
+            return Response({"error": "Invalid approver role"},status=status.HTTP_403_FORBIDDEN)
+
+        #  Save approval
+        approval = serializer.save(approved_by=user, role=role, wfh_request_id=wfh_request.id )
+
+        # FINAL STATUS UPDATE
+        if status_value == "APPROVED":
+
+            # SPECIAL → HR approval required
+            if wfh_request.approval_type == "NORMAL" and role.name == "HR":
+                wfh_request.status = "APPROVED"
+                wfh_request.save()
+
+            # NORMAL → manager approval is enough
+            if wfh_request.approval_type == "SPECIAL" and role.name == "ADMIN":
+                wfh_request.status = "APPROVED"
+                wfh_request.save()
+
+            # If admin approved but HR not
+            # if wfh_request.approval_type == "SPECIAL" and wfh_request.status == "APPROVED" and role.name != "HR":
+            #     return Response({"error": "Invalid approver role"},status=status.HTTP_403_FORBIDDEN)
+
+            # NORMAL OR SPECIAL → HR must approve
+            # if wfh_request.approval_type in ["NORMAL", "SPECIAL"] and role.name == "HR":
+            #     wfh_request.status = "APPROVED"
+            #     wfh_request.save()
+
+                # Attendance mark
+                Attendance.objects.create(
+                    employee=wfh_request.employee,
+                    date=wfh_request.from_date,
+                    status="PRESENT"
+                )
+
+        return Response(
+            WorkFromHomeApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
+
+
+class LeaveRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            session = LeaveApplication.objects.all()
+            serializer = LeaveRequestSerializer(session, many = True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        serializer = LeaveRequestSerializer(data=request.data)
+        if serializer.is_valid():
+            employee = Employee.objects.get(user=request.user)
+
+            serializer.save(employee=employee)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# class LeaveTypeViewSet(APIView):
+#     permission_classes = [IsAuthenticated]
 
 #     def post(self, request):
-#         serializer = HolidaySerializer(data=request.data)
+#         queryset = LeaveType.objects.all()
+#         serializer = LeaveTypeSerializer(queryset, data=request.data)
 #         if serializer.is_valid():
 #             serializer.save()
 #             return Response(serializer.data, status=status.HTTP_201_CREATED)
 #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+# class EmployeeLeaveBalanceViewSet(APIView):
+#     permission_classes = [IsAuthenticated]
 
-
-# class AttendanceView(APIView):
-#     def get(self, request):
-#         try:
-#             session = Attendance.objects.all()
-#             serializer = AttendanceSerializer(session, many = True)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def post(self, request):
-#         serializer = AttendanceSerializer(data=request.data)
+#     def post(self, request, pk):
+#         queryset = EmployeeLeaveBalance.objects.filter(employee=self.request.user)
+#         serializer = EmployeeLeaveBalanceSerializer(queryset, data=request.data)
 #         if serializer.is_valid():
 #             serializer.save()
 #             return Response(serializer.data, status=status.HTTP_201_CREATED)
 #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# class SalaryView(APIView):
-#     def get(self, request):
+# class LeaveApprovalViewSet(APIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def post(self, request, pk=None):
 #         try:
-#             session = Salary.objects.all()
-#             serializer = SalarySerializer(session, many = True)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
+#             leave = LeaveApplication.objects.get(pk=pk)
+#             if leave.manager_approved == True:
+#                 leave.status = 'PENDING'
+#                 leave.save()
+#                 return Response({"message": "Manager approved"})
+#             elif leave.hr_approved == True:
+#                 leave.status = 'APPROVED'
+#                 leave.save()
+#                 return Response({"message": "HR approved"})
 #         except Exception as e:
 #             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def post(self, request):
-#         serializer = SalarySerializer(data=request.data)
-#         if serializer.is_valid():
-#             serializer.save()
-#             return Response(serializer.data, status=status.HTTP_201_CREATED)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
