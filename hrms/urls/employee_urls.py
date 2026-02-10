@@ -22,14 +22,17 @@ urlpatterns = [
     path('employee_master/', EmployeeApiView.as_view(), name='employee_master'),
     path('employee_master/<int:pk>/', EmployeeApiView.as_view(), name='employee_master'),
     path('employee_emergency_contact/', EmployeeEmergencyContactView.as_view(), name='employee_emergency_contact'),
-    path('employee_address_identity/', EmployeeAddressIdentityView.as_view(), name='employee_address_identity'),
+    path('employee_address_identity/', EmployeeAddressIdentityRequestView.as_view(), name='employee_address_identity'),
+    path('employee_address_identity/<int:pk>/', EmployeeAddressIdentityRequestView.as_view(), name='employee_address_identity_detail'),
+    path('employee_details_checked_by_hr/', EmployeeDetailApiView.as_view(), name='employee_details_checkbox'),
+    path('employee_details_checked_by_hr/<int:pk>/', EmployeeDetailApiView.as_view(), name='employee_details_checkbox_detail'),
     
     path('work_from_home_request/', WorkFromHomeRequestView.as_view(), name='work_from_home_request'),
     path('work_from_home_approval/', WorkFromHomeApprovalView.as_view(), name='work_from_home_approval'),
 
-    # path('leave_request/', LeaveRequestView.as_view(), name='leave_request'),
-    # path('leave_request/<int:pk>/', LeaveRequestView.as_view(), name='leave_request_detail'),
-    # path('leave_type/', LeaveTypeViewSet.as_view(), name='leave_type'),
-    # path('leave_balance/', EmployeeLeaveBalanceViewSet.as_view(), name='leave_balance'),
-    # path('leave_approval/', LeaveApprovalViewSet.as_view(), name= 'leave_approval')
+    path('leave_request/', LeaveRequestView.as_view(), name='leave_request'),
+    path('leave_request/<int:pk>/', LeaveRequestView.as_view(), name='leave_request_detail'),
+    path('leave_type/', LeaveTypeViewSet.as_view(), name='leave_type'),
+#     path('leave_balance/', EmployeeLeaveBalanceViewSet.as_view(), name='leave_balance'),
+#     path('leave_approval/', LeaveApprovalViewSet.as_view(), name= 'leave_approval')
 ]

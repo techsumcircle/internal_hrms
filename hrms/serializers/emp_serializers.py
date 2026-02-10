@@ -77,6 +77,12 @@ class EmployeeAddressIdentitySerializer(serializers.ModelSerializer):
         model = EmployeeAddressIdentity
         fields = '__all__'
 
+class EmployeeDetailesCheckBoxSerializer(serializers.ModelSerializer):
+    employee = serializers.StringRelatedField(read_only=True)
+    class Meta:
+        model = EmployeeDetailesCheckBox
+        fields = '__all__'
+
 class AttendanceSerializer(serializers.ModelSerializer):
     employee = serializers.StringRelatedField(read_only=True)
     total_duration = serializers.DurationField(read_only=True)
@@ -113,19 +119,21 @@ class WorkFromHomeApprovalSerializer(serializers.ModelSerializer):
 #         fields = '__all__'
 
 
-# class LeaveTypeSerializer(serializers.ModelSerializer):
-#     # employee = serializers.StringRelatedField(read_only=True)
-#     class Meta:
-#         model = LeaveType
-#         fields = '__all__'
-#         # read_only_fields = ["employee"]
+class LeaveTypeSerializer(serializers.ModelSerializer):
+    # employee = serializers.StringRelatedField(read_only=True)
+    class Meta:
+        model = LeaveType
+        fields = '__all__'
+        # read_only_fields = ["employee"]
 
-# class EmployeeLeaveBalanceSerializer(serializers.ModelSerializer):
-#     leave_type = LeaveTypeSerializer(read_only=True)
+class EmployeeLeaveBalanceSerializer(serializers.ModelSerializer):
+    # leave_type = LeaveTypeSerializer(read_only=True)
+    leave_application = serializers.StringRelatedField(read_only=True)
 
-#     class Meta:
-#         model = EmployeeLeaveBalance
-#         fields = '__all__'
+    class Meta:
+        model = EmployeeLeaveBalance
+        fields = '__all__'
+        read_only_fields = ['leave_application']
 
 # class LeaveApplicationSerializer(serializers.ModelSerializer):
 #     employee = serializers.StringRelatedField(read_only=True)
@@ -134,5 +142,170 @@ class WorkFromHomeApprovalSerializer(serializers.ModelSerializer):
 #     class Meta:
 #         model = LeaveApplication
 #         fields = '__all__'
-#         read_only_fields = ("employee",'status', 'manager_approved', 'hr_approved', 'applied_date')
+#         read_only_fields = ('employee','status', 'manager_approved', 'hr_approved', 'applied_date')
 
+# class LeaveApprovalSerializer(serializers.ModelSerializer):
+#     leave_application = serializers.StringRelatedField(read_only=True)
+#     class Meta:
+#         model = LeaveApplication
+#         fields = [
+#             "id",
+#             "leave_application",
+#             "status",
+#             "manager_approved",
+#             "hr_approved"
+#         ]
+#         read_only_fields = ['manager_approved', 'hr_approved']
+
+# class LeaveApplicationSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = LeaveApplication
+        fields = '__all__'
+        read_only_fields = (
+            'employee',
+            'status',
+            'manager_approved',
+            'hr_approved',
+            'applied_date'
+        )
+
+    def validate(self, attrs):
+        employee = self.context['request'].user
+        leave_type = attrs.get('leave_type')
+        days = attrs.get('total_days')
+
+        balance = EmployeeLeaveBalance.objects.get(
+            employee=employee,
+            leave_type=leave_type
+        )
+
+        if leave_type.leave_type == 'Casual' and balance.casual_leave_balance < days:
+            raise serializers.ValidationError("Not enough Casual Leave")
+
+        if leave_type.leave_type == 'Sick' and balance.sick_leave_balance < days:
+            raise serializers.ValidationError("Not enough Sick Leave")
+
+        if leave_type.leave_type == 'Optional' and balance.optional_leave_balance < days:
+            raise serializers.ValidationError("Not enough Optional Leave")
+
+        if balance.available_balance < days:
+            raise serializers.ValidationError("Insufficient total leave balance")
+
+        return attrs
+
+
+# def deduct_leave_balance(sender, instance, created, **kwargs):
+
+#     # sirf APPROVAL pe chale
+#     if instance.status != 'APPROVED':
+#         return
+
+#     with transaction.atomic():
+
+#         balance = EmployeeLeaveBalance.objects.select_for_update().get(
+#             employee=instance.employee,
+#             leave_type=instance.leave_type
+#         )
+
+#         days = instance.total_days
+
+#         if instance.leave_type.leave_type == 'Casual':
+#             if balance.casual_leave_balance < days:
+#                 raise ValueError("Insufficient Casual Leave")
+
+#             balance.casual_leave_balance -= days
+
+#         elif instance.leave_type.leave_type == 'Sick':
+#             if balance.sick_leave_balance < days:
+#                 raise ValueError("Insufficient Sick Leave")
+
+#             balance.sick_leave_balance -= days
+
+#         elif instance.leave_type.leave_type == 'Optional':
+#             if balance.optional_leave_balance < days:
+#                 raise ValueError("Insufficient Optional Leave")
+
+#             balance.optional_leave_balance -= days
+
+#         # total available balance
+#         if balance.available_balance < days:
+#             raise ValueError("Insufficient Total Leave Balance")
+
+#         balance.available_balance -= days
+#         balance.save()
+
+
+
+# Employee Apply
+#    ↓
+# Validation (Balance + Overlap + Half Day)
+#    ↓
+# Status = PENDING
+#    ↓
+# Manager Approves
+#    ↓
+# HR Approves
+#    ↓
+# Leave Approved
+#    ↓
+# Leave Balance Deducted
+
+
+class LeaveApplicationSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = LeaveApplication
+        fields = '__all__'
+        read_only_fields = (
+            'employee',
+            'status',
+            'manager_approved',
+            'hr_approved',
+            'applied_date'
+        )
+
+    def validate(self, attrs):
+        user = self.context['request'].user
+        leave_type = attrs['leave_type']
+        days = attrs['total_days']
+        half_day = attrs.get('half_day', False)
+        from_date = attrs['from_date']
+        to_date = attrs['to_date']
+
+        # Date validation
+        if from_date > to_date:
+            raise serializers.ValidationError("Invalid date range")
+
+        # Half day rule
+        if half_day and not leave_type.half_day_allowed:
+            raise serializers.ValidationError("Half-day not allowed")
+
+        # Overlap check
+        if LeaveApplication.objects.filter(
+            employee=user,
+            from_date__lte=to_date,
+            to_date__gte=from_date,
+            status__in=['PENDING', 'APPROVED']
+        ).exists():
+            raise serializers.ValidationError("Leave already applied")
+
+        balance = EmployeeLeaveBalance.objects.get(employee=user)
+
+        # Balance validation
+        if leave_type.leave_type == 'Casual' and balance.casual_leave_balance < days:
+            raise serializers.ValidationError("Insufficient Casual Leave")
+
+        if leave_type.leave_type == 'Sick' and balance.sick_leave_balance < days:
+            raise serializers.ValidationError("Insufficient Sick Leave")
+
+        if leave_type.leave_type == 'Optional' and balance.optional_leave_balance < days:
+            raise serializers.ValidationError("Insufficient Optional Leave")
+
+        if leave_type.leave_type == 'CompOff' and balance.compoff_balance < days:
+            raise serializers.ValidationError("Insufficient Comp-Off balance")
+
+        if balance.available_balance < days:
+            raise serializers.ValidationError("Insufficient total balance")
+
+        return attrs

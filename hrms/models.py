@@ -70,7 +70,33 @@ class EmployeeEmergencyContact(models.Model):
 
     def __str__(self):
         return f"{self.employee} - {self.contact_name}"
-    
+
+class EmployeeDetailesCheckBox(models.Model):
+    HR_APPROVAL = [
+        ('APPROVED', 'APPROVED'),
+        ('PENDING', 'PENDING'),
+        ('REJECTED', 'REJECTED'),
+    ]
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    address_line1 = models.CharField(max_length=255)
+    address_line2 = models.CharField(max_length=255, null=True, blank=True)
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    postal_code = models.CharField(max_length=20)
+    country = models.CharField(max_length=100)
+    profile_picture = models.FileField(upload_to='profile_pictures/', null=True, blank=True)
+    identity_proof_type = models.CharField(max_length=100, null=True, blank=True)
+    identity_proof_number = models.CharField(max_length=100, null=True, blank=True)
+    identity_proof_document = models.FileField(upload_to='identity_proofs/', null=True, blank=True)
+    identity_proof_type_2 = models.CharField(max_length=100, null=True, blank=True)
+    identity_proof_number_2 = models.CharField(max_length=100, null=True, blank=True)
+    identity_proof_document_2 = models.FileField(upload_to='identity_proofs/', null=True, blank=True)
+    hr_approval = models.CharField(max_length=20, choices=HR_APPROVAL, default='Pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.employee}" 
 
 
 class EmployeeAddressIdentity(models.Model):
@@ -93,6 +119,7 @@ class EmployeeAddressIdentity(models.Model):
 
     def __str__(self):
         return f"{self.employee} - {self.address_line1}"
+    
 
 
 class Attendance(models.Model):
@@ -140,7 +167,7 @@ class WorkFromHomeRequest(models.Model):
 
     def __str__(self):
         return f"{self.employee} ({self.from_date} to {self.to_date})"
-      
+
 class WorkFromHomeApproval(models.Model):
     status_choices = [
         ('REGULAR', 'Regular'),
@@ -159,57 +186,64 @@ class WorkFromHomeApproval(models.Model):
 
 # User = settings.AUTH_USER_MODEL
 
-# class LeaveType(models.Model):
-#     PAID_CHOICES = (
-#         ('Paid', 'Paid'),
-#         ('UnPaid', 'UnPaid'),
-#     )
-#     LEAVE_TYPE = (
-#         ('Casual', 'Casual'),
-#         ('Sick', 'Sick'),
-#         ('Optional', 'Optional'),
-#     )
+class LeaveType(models.Model):
+    LEAVE_TYPE = (
+        ('Casual', 'Casual'),
+        ('Sick', 'Sick'),
+        ('Optional', 'Optional'),
+        ('CompOff', 'CompOff'),
+    )
 
-#     leave_type = models.CharField(max_length=50, choices=LEAVE_TYPE, null=True)  # Casual, Sick, Optional Holiday
-#     paid_type = models.CharField(max_length=10, choices=PAID_CHOICES, null=True)
-#     half_day_allowed = models.BooleanField(default=False)
-#     probation_eligible = models.BooleanField(default=True)
+    PAID_CHOICES = (
+        ('Paid', 'Paid'),
+        ('UnPaid', 'UnPaid'),
+    )
 
-#     def __str__(self):
-#         return self.leave_type
+    leave_type = models.CharField(max_length=20, choices=LEAVE_TYPE)
+    paid_type = models.CharField(max_length=10, choices=PAID_CHOICES)
+    half_day_allowed = models.BooleanField(default=False)
+    probation_eligible = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.leave_type
+
     
-# class EmployeeLeaveBalance(models.Model):
-#     employee = models.ForeignKey(User, on_delete=models.CASCADE)
-#     leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE)
-#     available_balance = models.DecimalField(max_digits=5, decimal_places=2)
+class EmployeeLeaveBalance(models.Model):
+    employee = models.OneToOneField(User, on_delete=models.CASCADE)
 
-#     class Meta:
-#         unique_together = ('employee', 'leave_type')
+    casual_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=11)
+    sick_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=11)
+    optional_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=2)
 
-#     def __str__(self):
-#         return f"{self.employee} - {self.leave_type}"
+    compoff_balance = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    available_balance = models.DecimalField(max_digits=5, decimal_places=2, default=24)
+
+    def __str__(self):
+        return self.employee.username
+
     
-# class LeaveApplication(models.Model):
-#     STATUS_CHOICES = (
-#         ('PENDING', 'Pending'),
-#         ('APPROVED', 'Approved'),
-#         ('REJECTED', 'Rejected'),
-#         ('CANCELLED', 'Cancelled'),
-#     )
-#     employee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='leave_applications')
-#     leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE)
-#     from_date = models.DateField()
-#     to_date = models.DateField()
-#     total_days = models.DecimalField(max_digits=5, decimal_places=2)
-#     half_day = models.BooleanField(default=False)
-#     reason = models.TextField()
-#     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
-#     applied_date = models.DateTimeField(auto_now_add=True)
+class LeaveApplication(models.Model):
+    STATUS_CHOICES = (
+        ('PENDING', 'Pending'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+        ('CANCELLED', 'Cancelled'),
+    )
+    employee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='leave_applications')
+    leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE)
+    from_date = models.DateField(timezone.now)
+    to_date = models.DateField(timezone.now)
+    total_days = models.DecimalField(max_digits=5, decimal_places=2)
+    half_day = models.BooleanField(default=False)
+    reason = models.TextField()
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
+    applied_date = models.DateTimeField(auto_now_add=True)
 
-#     # Approval Flow
-#     manager_approved = models.BooleanField(null=True, blank=True)
-#     hr_approved = models.BooleanField(null=True, blank=True)
+    # Approval Flow
+    manager_approved = models.BooleanField(null=True, blank=True)
+    hr_approved = models.BooleanField(null=True, blank=True)
 
-#     def __str__(self):
-#         return f"{self.employee} - {self.leave_type} ({self.status})"
+    def __str__(self):
+        return f"{self.employee} - {self.leave_type} ({self.status})"
 
