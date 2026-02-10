@@ -64,6 +64,7 @@ class RoleAPIView(APIView):
         except Role.DoesNotExist:
             return Response({'error': 'Role does not Exists'}, status=status.HTTP_404_NOT_FOUND)
 
+
 class RegisterAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -111,6 +112,7 @@ class RegisterAPIView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
@@ -337,20 +339,30 @@ class EmployeeApiView(APIView):
     #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 
-    def patch(self, request):
+    def put(self, request):
         try:
             user = request.user
-            employee = Employee.objects.get(user=request.user)
+            if user.role.name == "HR":
+                employee = Employee.objects.get(user=request.user)
+                serializer = EmployeeSerializer(employee, data=request.data, partial=True)
+                if serializer.is_valid():
+                    serializer.save()
+                    return Response(serializer.data, status=status.HTTP_200_OK)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            if user.role.name == "employee":
+                employee = Employee.objects.get(user=request.user)
+                serializer = EmployeeDetailesCheckBoxSerializer(data=request.data)
+                if serializer.is_valid():
+                    serializer.save(
+                        employee=employee,
+                        employee_data_for_approval=request.data,
+                        hr_approval="PENDING"
+                    )
+                    return Response({"message": "Details submitted for HR approval"}, status=status.HTTP_201_CREATED)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Only HR and Employee can submit employee details"}, status=status.HTTP_403_FORBIDDEN)
         except Employee.DoesNotExist:
-            return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        serializer = EmployeeSerializer(employee, data=request.data, partial=True)
-
-        if serializer.is_valid():
-            serializer.save()
-            return Response({"message": "Employee profile updated successfully", "data": serializer.data}, status=status.HTTP_200_OK)
-    
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Employee profile not found"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class EmployeeEmergencyContactView(APIView):
@@ -363,106 +375,31 @@ class EmployeeEmergencyContactView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def post(self, request):
+    def put(self, request):
         try:
-            employee = Employee.objects.get(user=request.user)
-            serializer = EmployeeEmergencyContactSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save(employee=employee)
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            user = request.user
+            if user.role.name == "HR":
+                employee = Employee.objects.get(user=request.user)
+                serializer = EmployeeEmergencyContactSerializer(data=request.data)
+                if serializer.is_valid():
+                    serializer.save(employee=employee)
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            if user.role.name == "employee":
+                employee = Employee.objects.get(user=request.user)
+                serializer = EmployeeDetailesCheckBoxSerializer(data=request.data)
+                if serializer.is_valid():
+                    serializer.save(
+                        employee=employee,
+                        employee_data_for_approval=request.data,
+                        hr_approval="PENDING"
+                    )
+                    return Response({"message": "Details submitted for HR approval"}, status=status.HTTP_201_CREATED)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Only HR and Employee can submit employee details"}, status=status.HTTP_403_FORBIDDEN)
         except Employee.DoesNotExist:
             return Response({"error": "Employee profile not found"}, status=status.HTTP_400_BAD_REQUEST)
-    
-        # 2. Create using serializer ONCE
-        
 
-        # contact = EmployeeEmergencyContact.objects.get(user=request.user)
-        # employee = EmployeeEmergencyContact.objects.get(employee=request.user)
-
-        # EmployeeEmergencyContact.objects.create(
-        #     employee=employee,
-        #     employee_id=employee.employee_id,
-        #     contact_name=request.data.get('contact_name'),
-        #     designation=request.data.get('designation'),
-        #     relationship=request.data.get('relationship'),
-        #     phone_number=request.data.get('phone_number'),
-        #     email=request.data.get('email'),
-        # )
-        # serializer = EmployeeEmergencyContactSerializer(employee, data=request.data)
-        # if serializer.is_valid():
-        #     serializer.save()
-        #     return Response(serializer.data, status=status.HTTP_201_CREATED)
-        # return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-# class EmployeeAddressIdentityView(APIView):
-#     permission_classes = [IsAuthenticated]
-#     parser_classes = (MultiPartParser, FormParser)
-#     def get(self, request):
-#         try:
-#             document = EmployeeAddressIdentity.objects.all()
-#             serializer = EmployeeAddressIdentitySerializer(document, many = True)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def post(self, request):
-#         try:
-
-#             employee = Employee.objects.get(user=request.user)
-#             serializer = EmployeeAddressIdentitySerializer(data=request.data, partial=True)
-#             if serializer.is_valid():
-#                 hr_approval = User.objects.get(user=request.user)
-
-
-
-#                 serializer.save(employee=employee)
-#                 return Response(serializer.data, status=status.HTTP_200_OK)
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-
-# class EmployeeDetailApiView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def get(self, request, pk):
-#         try:
-#             user = request.user
-#             employee = EmployeeDetailesCheckBox.objects.get(pk=pk)
-#             serializer = EmployeeDetailesCheckBoxSerializer(employee)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except EmployeeDetailesCheckBox.DoesNotExist:
-#             return Response({'error': 'Employee details not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-#     def put(self, request, pk):
-#         try:
-#             user = request.user
-
-#             employee = EmployeeDetailesCheckBox.objects.get(pk=pk)
-#             serializer = EmployeeDetailesCheckBoxSerializer(employee, data=request.data, partial=True)
-#             serializer.validated_data['employee'] = employee.employee
-#             if serializer.is_valid():
-#                 if user.role.name != "HR":
-#                     return Response({"error": "Invalid approver role"},status=status.HTTP_403_FORBIDDEN)
-                
-#                 if serializer.validated_data.get('hr_approval') == "APPROVED":
-#                     serializer.validated_data['hr_approval'] = "APPROVED"
-#                 elif serializer.validated_data.get('hr_approval') == "REJECTED":
-#                     serializer.validated_data['hr_approval'] = "REJECTED"
-#                 else:
-#                     return Response({"error": "Invalid approval status"}, status=status.HTTP_400_BAD_REQUEST)
-                
-#                 serializer.save()
-#                 return Response(serializer.data, status=status.HTTP_200_OK)
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-#         except EmployeeDetailesCheckBox.DoesNotExist:
-#             return Response({'error': 'Employee details not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-        
-        
-#         # addressidentityview me jo employee data submit karta hai wo data is mopdel (EmployeeDetailesCheckBox) me jayega or usi employee ke details checkbox me show hoga aur hr usko approve ya reject karega agar reject karta hai to employee ko notification jayega ki aapke address or identity details reject kar diye gaye hai aur agar approve karta hai to employee ko notification jayega ki aapke address or identity details approve kar diye gaye hai and hr approval ke jo bhi ho employee ka address or identity details show hoga or agar approved hua sirf tabhi wo sara data iss model (EmployeeAddressIdentity) me save hoga.
-   
 
 class EmployeeAddressIdentityRequestView(APIView):
     permission_classes = [IsAuthenticated]
@@ -476,17 +413,30 @@ class EmployeeAddressIdentityRequestView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def post(self, request):
-        employee = Employee.objects.get(user=request.user)
-
-        serializer = EmployeeDetailesCheckBoxSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(
-                employee=employee,
-                hr_approval="PENDING"
-            )
-            return Response({"message": "Details submitted for HR approval"}, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    def put(self, request):
+        try:
+            user = request.user
+            if user.role.name == "HR":
+                employee = Employee.objects.get(user=request.user)
+                serializer = EmployeeAddressIdentitySerializer(data=request.data)
+                if serializer.is_valid():
+                    serializer.save(employee=employee)
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            if user.role.name == "employee":
+                employee = Employee.objects.get(user=request.user)
+                serializer = EmployeeDetailesCheckBoxSerializer(data=request.data)
+                if serializer.is_valid():
+                    serializer.save(
+                        employee=employee,
+                        # employee_data_for_approval=request.data,
+                        hr_approval="PENDING"
+                    )
+                    return Response({"message": "Details submitted for HR approval"}, status=status.HTTP_201_CREATED)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Only HR and Employee can submit employee details"}, status=status.HTTP_403_FORBIDDEN)
+        except Employee.DoesNotExist:
+            return Response({"error": "Employee profile not found"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class EmployeeDetailApiView(APIView):
@@ -499,53 +449,157 @@ class EmployeeDetailApiView(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except EmployeeDetailesCheckBox.DoesNotExist:
             return Response({'error': 'Employee details not found'}, status=status.HTTP_404_NOT_FOUND)
+        
 
     def put(self, request, pk):
         user = request.user
-
+    
         if user.role.name != "HR":
-            return Response({"error": "Only HR can approve"}, status=status.HTTP_403_FORBIDDEN)
-
+            return Response(
+                {"error": "Only HR can approve"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+    
+        # 2️ Get approval request
         try:
             checkbox = EmployeeDetailesCheckBox.objects.get(pk=pk)
         except EmployeeDetailesCheckBox.DoesNotExist:
-            return Response({"error": "Employee details not found"}, status=status.HTTP_404_NOT_FOUND)
-
+            return Response(
+                {"error": "Employee details not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+        # 3️ Validate approval status
         approval_status = request.data.get("hr_approval")
-
         if approval_status not in ["APPROVED", "REJECTED"]:
-            return Response({"error": "Invalid approval status"}, status=status.HTTP_400_BAD_REQUEST)
-
+            return Response(
+                {"error": "Invalid approval status"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+        # 4️ Update approval status
         checkbox.hr_approval = approval_status
         checkbox.save()
-
-        if approval_status == "APPROVED":
-            EmployeeAddressIdentity.objects.create(
-                employee=checkbox.employee,
-                address_line1=checkbox.address_line1,
-                address_line2=checkbox.address_line2,
-                city=checkbox.city,
-                state=checkbox.state,
-                postal_code=checkbox.postal_code,
-                country=checkbox.country,
-                profile_picture=checkbox.profile_picture,
-                identity_proof_type=checkbox.identity_proof_type,
-                identity_proof_number=checkbox.identity_proof_number,
-                identity_proof_document=checkbox.identity_proof_document,
-                identity_proof_type_2=checkbox.identity_proof_type_2,
-                identity_proof_number_2=checkbox.identity_proof_number_2,
-                identity_proof_document_2=checkbox.identity_proof_document_2,
+    
+        #  If rejected → stop here
+        if approval_status == "REJECTED":
+            self.send_notification(
+                checkbox.employee.user,
+                "Sorry, your details were REJECTED by HR. Please resubmit with correct information."
             )
-
-            self.send_notification(checkbox.employee.user,"Congratulations your address and identity details have been APPROVED by HR")
-
-        else:
-            self.send_notification(checkbox.employee.user,"Sorry your address and identity details have been REJECTED by HR. Kindly resubmit with correct details.")
-
-        return Response({"message": f"Details {approval_status} successfully"},status=status.HTTP_200_OK)
-
+            return Response(
+                {"message": "Details REJECTED successfully"},
+                status=status.HTTP_200_OK
+            )
+    
+        #  APPROVED FLOW
+        data = checkbox.employee_data_for_approval or {}
+    
+        employee_data = data.get("employee", {})
+        emergency_data = data.get("emergency_contact", {})
+        address_data = data.get("address_identity", {})
+    
+        # 5️ Atomic transaction (all or nothing)
+        with transaction.atomic():
+    
+            #  Employee table update (only if data exists)
+            if employee_data:
+                Employee.objects.filter(
+                    id=checkbox.employee.id
+                ).update(**employee_data)
+    
+            #  Emergency Contact table
+            if emergency_data:
+                EmployeeEmergencyContact.objects.update_or_create(
+                    employee=checkbox.employee,
+                    defaults=emergency_data
+                )
+    
+            #  Address & Identity table
+            if address_data:
+                EmployeeAddressIdentity.objects.update_or_create(
+                    employee=checkbox.employee,
+                    defaults=address_data
+                )
+    
+        # 6️ Notify employee
+        self.send_notification(
+            checkbox.employee.user,
+            "Congratulations! Your details have been APPROVED by HR."
+        )
+    
+        return Response(
+            {"message": "Details APPROVED successfully"},
+            status=status.HTTP_200_OK
+        )
     def send_notification(self, user, message):
         print(f"Notification to {user.username}: {message}")
+    
+    # def put(self, request, pk):
+    #     user = request.user
+
+    #     if user.role.name != "HR":
+    #         return Response({"error": "Only HR can approve"}, status=status.HTTP_403_FORBIDDEN)
+    #     try:
+    #         checkbox = EmployeeDetailesCheckBox.objects.get(pk=pk)
+    #     except EmployeeDetailesCheckBox.DoesNotExist:
+    #         return Response({"error": "Employee details not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    #     approval_status = request.data.get("hr_approval")
+
+    #     if approval_status not in ["APPROVED", "REJECTED"]:
+    #         return Response({"error": "Invalid approval status"}, status=status.HTTP_400_BAD_REQUEST)
+
+    #     checkbox.hr_approval = approval_status
+    #     checkbox.save()
+
+    #     if approval_status == "APPROVED":
+    #         Employee.objects.update_or_create(
+    #             user=checkbox.employee.user,
+    #             defaults={
+    #                 "full_name": checkbox.employee.full_name,
+    #                 "gender": checkbox.employee.gender,
+    #                 "marital_status": checkbox.employee.marital_status,
+    #                 "blood_group": checkbox.employee.blood_group,
+    #                 "date_of_birth": checkbox.employee.date_of_birth,
+    #                 "mobile_number": checkbox.employee.mobile_number,
+    #             }
+    #         )
+
+    #         EmployeeEmergencyContact.objects.update_or_create(
+    #             employee=checkbox.employee,
+    #             defaults={
+    #                 "contact_name": checkbox.contact_name,
+    #                 "designation": checkbox.designation,
+    #                 "relationship": checkbox.relationship,
+    #                 "phone_number": checkbox.phone_number,
+    #                 "email": checkbox.email,
+    #             }
+    #         )
+
+    #         EmployeeAddressIdentity.objects.update_or_create(
+    #             employee=checkbox.employee,
+    #             defaults={
+    #                 "address_line1": checkbox.address_line1,
+    #                 "address_line2": checkbox.address_line2,
+    #                 "city": checkbox.city,
+    #                 "state": checkbox.state,
+    #                 "postal_code": checkbox.postal_code,
+    #                 "country": checkbox.country,
+    #                 "profile_picture": checkbox.profile_picture,
+    #                 "identity_proof_type": checkbox.identity_proof_type,
+    #                 "identity_proof_number": checkbox.identity_proof_number,
+    #                 "identity_proof_document": checkbox.identity_proof_document,
+    #                 "identity_proof_type_2": checkbox.identity_proof_type_2,
+    #                 "identity_proof_number_2": checkbox.identity_proof_number_2,
+    #                 "identity_proof_document_2": checkbox.identity_proof_document_2,
+    #             }
+    #         )
+    #         self.send_notification(checkbox.employee.user,"Congratulations your address and identity details have been APPROVED by HR")
+    #     else:
+    #         self.send_notification(checkbox.employee.user,"Sorry your address and identity details have been REJECTED by HR. Kindly resubmit with correct details.")
+    #     return Response({"message": f"Details {approval_status} successfully"},status=status.HTTP_200_OK)
+
 
 
 class AttendanceApiView(APIView):
@@ -807,7 +861,7 @@ class WorkFromHomeApprovalView(APIView):
                 wfh_request.status = "APPROVED"
                 wfh_request.save()
 
-            # NORMAL → manager approval is enough
+            # NORMAL → admin approval is enough
             if wfh_request.approval_type == "SPECIAL" and role.name == "ADMIN":
                 wfh_request.status = "APPROVED"
                 wfh_request.save()
@@ -831,27 +885,6 @@ class WorkFromHomeApprovalView(APIView):
         return Response(WorkFromHomeApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
 
 
-# class LeaveRequestView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def get(self, request):
-#         try:
-#             session = LeaveApplication.objects.all()
-#             serializer = LeaveRequestSerializer(session, many = True)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def post(self, request):
-#         serializer = LeaveRequestSerializer(data=request.data)
-#         if serializer.is_valid():
-#             employee = Employee.objects.get(user=request.user)
-
-#             serializer.save(employee=employee)
-#             return Response(serializer.data, status=status.HTTP_201_CREATED)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 class LeaveTypeViewSet(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -864,105 +897,141 @@ class LeaveTypeViewSet(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# class EmployeeLeaveBalanceViewSet(APIView):
-#     permission_classes = [IsAuthenticated]
+class EmployeeLeaveBalanceViewSet(APIView):
+    permission_classes = [IsAuthenticated]
 
-#     def post(self, request):
-#         queryset = EmployeeLeaveBalance.objects.filter(employee=self.request.user)
-#         available_balance = queryset.first()
-#         serializer = EmployeeLeaveBalanceSerializer(instance=available_balance, context={'available_balance': available_balance}, data=request.data, partial=True)
-#         # serializer = EmployeeLeaveBalanceSerializer(queryset, data=request.data)
-#         if serializer.is_valid():
-#             casual_leave = serializer.validated_data.get('casual_leave_balance')
-#             sick_leave = serializer.validated_data.get('sick_leave_balance')
-#             optional_leave = serializer.validated_data.get('optional_leave_balance')
+    def post(self, request):
+        queryset = EmployeeLeaveBalance.objects.filter(employee=self.request.user)
+        available_balance = queryset.first()
+        serializer = EmployeeLeaveBalanceSerializer(instance=available_balance, context={'available_balance': available_balance}, data=request.data, partial=True)
+        # serializer = EmployeeLeaveBalanceSerializer(queryset, data=request.data)
+        if serializer.is_valid():
+            optional_leave = serializer.validated_data.get('optional_leave_balance')
 
-#             serializer.save()
-#             return Response(serializer.data, status=status.HTTP_201_CREATED)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# class LeaveApprovalViewSet(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def post(self, request, pk=None):
-#         try:
-#             leave = LeaveApplication.objects.get(pk=pk)
-#             if leave.manager_approved == True:
-#                 leave.status = 'PENDING'
-#                 leave.save()
-#                 return Response({"message": "Manager approved"})
-#             elif leave.hr_approved == True:
-#                 leave.status = 'APPROVED'
-#                 leave.save()
-#                 return Response({"message": "HR approved"})
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-# class LeaveApproveAPIView(APIView):
-
-#     def post(self, request, leave_id):
-#         leave = LeaveApplication.objects.get(id=leave_id)
-
-#         if leave.status != 'APPROVED':
-#             leave.status = 'APPROVED'
-#             leave.manager_approved = True
-#             leave.hr_approved = True
-#             leave.save()
-
-#             balance = EmployeeLeaveBalance.objects.get(
-#                 employee=leave.employee,
-#                 leave_type=leave.leave_type
-#             )
-
-#             days = leave.total_days
-
-#             if leave.leave_type.leave_type == 'Casual':
-#                 balance.casual_leave_balance -= days
-
-#             elif leave.leave_type.leave_type == 'Sick':
-#                 balance.sick_leave_balance -= days
-
-#             elif leave.leave_type.leave_type == 'Optional':
-#                 balance.optional_leave_balance -= days
-
-#             # total available balance
-#             balance.available_balance -= days
-#             balance.save()
-
-#             return Response({"message": "Leave approved & balance updated"}, status=200)
-
-#         return Response({"message": "Already approved"}, status=400)
 
 class LeaveRequestView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = LeaveApplicationSerializer(
-            data=request.data,
-            context={'request': request}
-        )
+        user = request.user
 
+        # Role check
+        if user.role.name != "employee":
+            return Response({"error": "Only employees can apply for leave"}, status=status.HTTP_403_FORBIDDEN)
+        
+        employee = Employee.objects.get(user=request.user)
+        
+        
+        data = request.data
+
+        try:
+
+            leave_type = LeaveType.objects.get(id=data.get('leave_type'))
+            half_day = data.get('half_day', False)
+        
+            from_date = datetime.strptime(data.get('from_date'), "%Y-%m-%d").date()
+            to_date = datetime.strptime(data.get('to_date'), "%Y-%m-%d").date()
+        
+            if from_date > to_date:
+                return Response({"error": "Invalid date range"}, status=status.HTTP_400_BAD_REQUEST)
+        
+            total_days = (to_date - from_date).days + 1
+        
+            if half_day:
+                total_days = 0.5
+        
+        except Exception:
+            return Response({"error": "Invalid input data"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # try:
+        #     employee = employee
+        #     leave_type = LeaveType.objects.get(id=data.get('leave_type'))
+        #     half_day = data.get('half_day', False)
+        #     from_date = data.get('from_date')
+        #     to_date = data.get('to_date')
+        #     total_days = float(from_date and to_date and (to_date - from_date).days + 1 or 0)
+        # except Exception as e:
+        #     return Response(
+        #         {"error": "Invalid input data"},
+        #         status=status.HTTP_400_BAD_REQUEST
+        #     )
+        # print(employee, leave_type, total_days, half_day, from_date, to_date)
+
+        # Date validation
+        if from_date > to_date:
+            return Response(
+                {"error": "Invalid date range"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Half-day rule
+        if half_day and not leave_type.half_day_allowed:
+            return Response({"error": "Half-day not allowed"},status=status.HTTP_400_BAD_REQUEST)
+
+        # Overlapping leave check
+        if LeaveApplication.objects.filter(
+            employee=employee,
+            from_date__lte=to_date,
+            to_date__gte=from_date,
+            status__in=['PENDING', 'APPROVED']
+        ).exists():
+            return Response(
+                {"error": "Leave already applied"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        print(employee)
+
+        # Balance validation
+        try:    
+            balance = EmployeeLeaveBalance.objects.get(employee=employee)
+        except EmployeeLeaveBalance.DoesNotExist:
+            return Response({"error": "Leave balance not initialized for this employee"},status=status.HTTP_400_BAD_REQUEST)
+
+        # print(balance)
+
+        if leave_type.leave_type == 'Casual' and balance.casual_leave_balance < total_days:
+            return Response({"error": "Insufficient Casual Leave"}, status=400)
+
+        if leave_type.leave_type == 'Sick' and balance.sick_leave_balance < total_days:
+            return Response({"error": "Insufficient Sick Leave"}, status=400)
+
+        if leave_type.leave_type == 'Optional' and balance.optional_leave_balance < total_days:
+            return Response({"error": "Insufficient Optional Leave"}, status=400)
+
+        if leave_type.leave_type == 'CompOff' and balance.compoff_balance < total_days:
+            return Response({"error": "Insufficient Comp-Off balance"}, status=400)
+
+        if balance.available_balance < total_days:
+            return Response({"error": "Insufficient total balance"}, status=400)
+
+        # Save leave application
+        serializer = LeaveApplicationSerializer(data=data)
         if serializer.is_valid():
-            serializer.save(employee=request.user)
-            return Response(serializer.data, status=201)
+            serializer.save(employee=employee)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        return Response(serializer.errors, status=400)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class ManagerLeaveApproveAPIView(APIView):
+
+class AdminLeaveApproveAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, leave_id):
         leave = LeaveApplication.objects.get(id=leave_id)
 
-        if leave.manager_approved:
-            return Response({"message": "Already approved by manager"}, status=400)
+        if leave.admin_approved:
+            return Response({"message": "Already approved by admin"}, status=400)
 
-        leave.manager_approved = True
+        leave.admin_approved = True
         leave.status = 'PENDING'
         leave.save()
 
-        return Response({"message": "Manager approved"}, status=200)
+        return Response({"message": "Admin approved"}, status=200)
 
 
 from django.db import transaction
@@ -978,8 +1047,8 @@ class HRLeaveApproveAPIView(APIView):
         if leave.status == 'APPROVED':
             return Response({"message": "Already approved"}, status=400)
 
-        if not leave.manager_approved:
-            return Response({"message": "Manager approval required"}, status=400)
+        if not leave.admin_approved:
+            return Response({"message": "Admin approval required"}, status=400)
 
         leave.hr_approved = True
         leave.status = 'APPROVED'
@@ -1056,22 +1125,70 @@ class LeaveCancelAPIView(APIView):
 
         return Response({"message": "Leave cancelled & balance reverted"}, status=200)
 
+# class CompOffCreditAPIView(APIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def post(self, request):
+#         employee_id = request.data.get("employee_id")
+#         days = request.data.get("days", 1) # if no leave in optional days and attendance was marked as present then 1 comp-off will be credited
+
+#         balance = EmployeeLeaveBalance.objects.get(employee_id=employee_id)
+
+#         balance.compoff_balance += days
+#         balance.available_balance += days
+#         balance.save()
+
+#         return Response({"message": f"{days} Comp-Off credited"}, status=200)
+
 class CompOffCreditAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        user = request.user
+
+        # Role check
+        if user.role.name not in ["hr", "admin"]:
+            return Response(
+                {"error": "You are not allowed to credit Comp-Off"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         employee_id = request.data.get("employee_id")
         days = request.data.get("days", 1)
 
-        balance = EmployeeLeaveBalance.objects.get(employee_id=employee_id)
+        # Validation
+        if not employee_id:
+            return Response(
+                {"error": "employee_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
+        try:
+            days = int(days)
+            if days <= 0:
+                raise ValueError
+        except ValueError:
+            return Response(
+                {"error": "days must be a positive integer"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            balance = EmployeeLeaveBalance.objects.get(employee_id=employee_id)
+        except EmployeeLeaveBalance.DoesNotExist:
+            return Response(
+                {"error": "Employee not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Credit comp-off
         balance.compoff_balance += days
         balance.available_balance += days
         balance.save()
 
         return Response(
-            {"message": f"{days} Comp-Off credited"},
-            status=200
+            {"message": f"{days} Comp-Off credited successfully"},
+            status=status.HTTP_200_OK
         )
 
 

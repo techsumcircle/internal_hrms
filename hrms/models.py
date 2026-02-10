@@ -42,9 +42,11 @@ class MobileOTP(models.Model):
     mobile_number = models.CharField(max_length=15)
     otp = models.CharField(max_length=6)
     created_at = models.DateTimeField(default=timezone.now)
-    
+
+
 class Employee(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee', null=True, blank=True)
+    username = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee_username', null=True, blank=True)
     employee_id = models.CharField(max_length=50, unique=True, null=True, blank=True, editable=False)
     full_name = models.CharField(max_length=30)
     email = models.EmailField(unique=True)
@@ -71,34 +73,6 @@ class EmployeeEmergencyContact(models.Model):
     def __str__(self):
         return f"{self.employee} - {self.contact_name}"
 
-class EmployeeDetailesCheckBox(models.Model):
-    HR_APPROVAL = [
-        ('APPROVED', 'APPROVED'),
-        ('PENDING', 'PENDING'),
-        ('REJECTED', 'REJECTED'),
-    ]
-    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
-    address_line1 = models.CharField(max_length=255)
-    address_line2 = models.CharField(max_length=255, null=True, blank=True)
-    city = models.CharField(max_length=100)
-    state = models.CharField(max_length=100)
-    postal_code = models.CharField(max_length=20)
-    country = models.CharField(max_length=100)
-    profile_picture = models.FileField(upload_to='profile_pictures/', null=True, blank=True)
-    identity_proof_type = models.CharField(max_length=100, null=True, blank=True)
-    identity_proof_number = models.CharField(max_length=100, null=True, blank=True)
-    identity_proof_document = models.FileField(upload_to='identity_proofs/', null=True, blank=True)
-    identity_proof_type_2 = models.CharField(max_length=100, null=True, blank=True)
-    identity_proof_number_2 = models.CharField(max_length=100, null=True, blank=True)
-    identity_proof_document_2 = models.FileField(upload_to='identity_proofs/', null=True, blank=True)
-    hr_approval = models.CharField(max_length=20, choices=HR_APPROVAL, default='Pending')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"{self.employee}" 
-
-
 class EmployeeAddressIdentity(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
     address_line1 = models.CharField(max_length=255)
@@ -119,7 +93,19 @@ class EmployeeAddressIdentity(models.Model):
 
     def __str__(self):
         return f"{self.employee} - {self.address_line1}"
-    
+
+class EmployeeDetailesCheckBox(models.Model):
+    HR_APPROVAL = [
+        ('APPROVED', 'APPROVED'),
+        ('PENDING', 'PENDING'),
+        ('REJECTED', 'REJECTED'),
+    ]
+
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    employee_data_for_approval = models.JSONField()
+    hr_approval = models.CharField(max_length=20, choices=HR_APPROVAL, default='PENDING')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class Attendance(models.Model):
@@ -143,7 +129,7 @@ class Attendance(models.Model):
     def __str__(self):
         return f"{self.employee} - {self.date}"
 
-    
+
 class WorkFromHomeRequest(models.Model):
     WFH_CHOICES = [
         ('REGULAR', 'Regular'),
@@ -199,17 +185,17 @@ class LeaveType(models.Model):
         ('UnPaid', 'UnPaid'),
     )
 
-    leave_type = models.CharField(max_length=20, choices=LEAVE_TYPE)
-    paid_type = models.CharField(max_length=10, choices=PAID_CHOICES)
+    leave_type = models.CharField(max_length=20, choices=LEAVE_TYPE, null=True, blank=True)
+    paid_type = models.CharField(max_length=10, choices=PAID_CHOICES, null=True, blank=True)
     half_day_allowed = models.BooleanField(default=False)
     probation_eligible = models.BooleanField(default=True)
 
     def __str__(self):
         return self.leave_type
 
-    
+
 class EmployeeLeaveBalance(models.Model):
-    employee = models.OneToOneField(User, on_delete=models.CASCADE)
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
 
     casual_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=11)
     sick_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=11)
@@ -230,7 +216,7 @@ class LeaveApplication(models.Model):
         ('REJECTED', 'Rejected'),
         ('CANCELLED', 'Cancelled'),
     )
-    employee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='leave_applications')
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='leave_applications')
     leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE)
     from_date = models.DateField(timezone.now)
     to_date = models.DateField(timezone.now)
@@ -241,7 +227,7 @@ class LeaveApplication(models.Model):
     applied_date = models.DateTimeField(auto_now_add=True)
 
     # Approval Flow
-    manager_approved = models.BooleanField(null=True, blank=True)
+    admin_approved = models.BooleanField(null=True, blank=True)
     hr_approved = models.BooleanField(null=True, blank=True)
 
     def __str__(self):

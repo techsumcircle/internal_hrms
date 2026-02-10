@@ -30,9 +30,13 @@ urlpatterns = [
     path('work_from_home_request/', WorkFromHomeRequestView.as_view(), name='work_from_home_request'),
     path('work_from_home_approval/', WorkFromHomeApprovalView.as_view(), name='work_from_home_approval'),
 
+    path('leave_type/', LeaveTypeViewSet.as_view(), name='leave_type'),
+    path('leave_balance/', EmployeeLeaveBalanceViewSet.as_view(), name='leave_balance'),
     path('leave_request/', LeaveRequestView.as_view(), name='leave_request'),
     path('leave_request/<int:pk>/', LeaveRequestView.as_view(), name='leave_request_detail'),
-    path('leave_type/', LeaveTypeViewSet.as_view(), name='leave_type'),
-#     path('leave_balance/', EmployeeLeaveBalanceViewSet.as_view(), name='leave_balance'),
-#     path('leave_approval/', LeaveApprovalViewSet.as_view(), name= 'leave_approval')
+    path('admin_leave_approval/', AdminLeaveApproveAPIView.as_view(), name='admin_leave_approval'),
+    path('hr_leave_approval/', HRLeaveApproveAPIView.as_view(), name= 'hr_leave_approval'),
+    path('leave_approval_reject/', LeaveRejectAPIView.as_view(), name='leave_approval_reject'),
+    path('leave_approval_cancel/', LeaveCancelAPIView.as_view(), name='leave_approval_cancel'),
+    path('leave_approval_compoff/', CompOffCreditAPIView.as_view(), name='leave_approval_compoff'),
 ]
