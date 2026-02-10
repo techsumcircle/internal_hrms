@@ -131,11 +131,11 @@ class WorkFromHomeApprovalSerializer(serializers.ModelSerializer):
 #         fields = '__all__'
 
 
-class LeaveTypeSerializer(serializers.ModelSerializer):
+# class LeaveTypeSerializer(serializers.ModelSerializer):
     # employee = serializers.StringRelatedField(read_only=True)
-    class Meta:
-        model = LeaveType
-        fields = '__all__'
+    # class Meta:
+    #     model = LeaveType
+    #     fields = '__all__'
         # read_only_fields = ["employee"]
 
 class EmployeeLeaveBalanceSerializer(serializers.ModelSerializer):
@@ -146,6 +146,18 @@ class EmployeeLeaveBalanceSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['leave_application']
 
+class LeaveApplicationSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = LeaveApplication
+        fields = '__all__'
+        read_only_fields = (
+            'employee',
+            'status',
+            'admin_approved',
+            'hr_approved',
+            'applied_date'
+        )
 
 # class LeaveApprovalSerializer(serializers.ModelSerializer):
 #     leave_application = serializers.StringRelatedField(read_only=True)
@@ -218,18 +230,7 @@ class EmployeeLeaveBalanceSerializer(serializers.ModelSerializer):
 # Leave Balance Deducted
 
 
-class LeaveApplicationSerializer(serializers.ModelSerializer):
 
-    class Meta:
-        model = LeaveApplication
-        fields = '__all__'
-        read_only_fields = (
-            'employee',
-            'status',
-            'admin_approved',
-            'hr_approved',
-            'applied_date'
-        )
 
     # def validate(self, attrs):
     #     employee = self.context['request'].user

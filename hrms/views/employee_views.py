@@ -142,7 +142,7 @@ class LoginAPIView(APIView):
             )
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
- 
+
 
 class UserAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -885,23 +885,12 @@ class WorkFromHomeApprovalView(APIView):
         return Response(WorkFromHomeApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
 
 
-class LeaveTypeViewSet(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        # queryset = LeaveType.objects.all()
-        serializer = LeaveTypeSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 class EmployeeLeaveBalanceViewSet(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        queryset = EmployeeLeaveBalance.objects.filter(employee=self.request.user)
+        employee = Employee.objects.get(user=request.user)
+        queryset = EmployeeLeaveBalance.objects.filter(employee=employee)
         available_balance = queryset.first()
         serializer = EmployeeLeaveBalanceSerializer(instance=available_balance, context={'available_balance': available_balance}, data=request.data, partial=True)
         # serializer = EmployeeLeaveBalanceSerializer(queryset, data=request.data)
@@ -930,7 +919,7 @@ class LeaveRequestView(APIView):
 
         try:
 
-            leave_type = LeaveType.objects.get(id=data.get('leave_type'))
+            leave_type = data.get('leave_type')
             half_day = data.get('half_day', False)
         
             from_date = datetime.strptime(data.get('from_date'), "%Y-%m-%d").date()
@@ -969,8 +958,8 @@ class LeaveRequestView(APIView):
             )
 
         # Half-day rule
-        if half_day and not leave_type.half_day_allowed:
-            return Response({"error": "Half-day not allowed"},status=status.HTTP_400_BAD_REQUEST)
+        if half_day and leave_type not in ['Casual', 'Sick']:
+            return Response({"error": "Half-day not allowed for this leave type"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Overlapping leave check
         if LeaveApplication.objects.filter(
@@ -979,11 +968,8 @@ class LeaveRequestView(APIView):
             to_date__gte=from_date,
             status__in=['PENDING', 'APPROVED']
         ).exists():
-            return Response(
-                {"error": "Leave already applied"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        print(employee)
+            return Response({"error": "Leave already applied"}, status=status.HTTP_400_BAD_REQUEST)
+        # print(employee)
 
         # Balance validation
         try:    
@@ -1016,8 +1002,6 @@ class LeaveRequestView(APIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-
 class AdminLeaveApproveAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1028,7 +1012,7 @@ class AdminLeaveApproveAPIView(APIView):
             return Response({"message": "Already approved by admin"}, status=400)
 
         leave.admin_approved = True
-        leave.status = 'PENDING'
+        leave.status = 'APPROVED'
         leave.save()
 
         return Response({"message": "Admin approved"}, status=200)
@@ -1060,13 +1044,15 @@ class HRLeaveApproveAPIView(APIView):
 
         days = leave.total_days
 
-        if leave.leave_type.leave_type == 'Casual':
+        if leave.leave_type == 'Casual':
             balance.casual_leave_balance -= days
-        elif leave.leave_type.leave_type == 'Sick':
+        elif leave.leave_type == 'Sick':
             balance.sick_leave_balance -= days
-        elif leave.leave_type.leave_type == 'Optional':
+        elif leave.leave_type == 'Optional':
             balance.optional_leave_balance -= days
-
+        elif leave.leave_type == 'CompOff':
+            balance.compoff_balance -= days
+        
         balance.available_balance -= days
         balance.save()
 
@@ -1110,16 +1096,18 @@ class LeaveCancelAPIView(APIView):
 
         days = leave.total_days
 
-        if leave.leave_type.leave_type == 'Casual':
+        if leave.leave_type == 'Casual':
             balance.casual_leave_balance += days
-        elif leave.leave_type.leave_type == 'Sick':
+        elif leave.leave_type == 'Sick':
             balance.sick_leave_balance += days
-        elif leave.leave_type.leave_type == 'Optional':
+        elif leave.leave_type == 'Optional':
             balance.optional_leave_balance += days
-
+        elif leave.leave_type == 'CompOff':
+            balance.compoff_balance += days
+        
         balance.available_balance += days
         balance.save()
-
+        
         leave.status = 'CANCELLED'
         leave.save()
 
@@ -1223,9 +1211,7 @@ def approve_leave(leave):
 @transaction.atomic
 def cancel_leave(leave):
 
-    balance = EmployeeLeaveBalance.objects.select_for_update().get(
-        employee=leave.employee
-    )
+    balance = EmployeeLeaveBalance.objects.select_for_update().get(employee=leave.employee)
 
     days = leave.total_days
     lt = leave.leave_type.leave_type
