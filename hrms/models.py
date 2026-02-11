@@ -225,7 +225,7 @@ class LeaveApplication(models.Model):
     applied_date = models.DateTimeField(auto_now_add=True)
 
     # Approval Flow
-    admin_approved = models.BooleanField(null=True, blank=True)
+    manager_approved = models.BooleanField(null=True, blank=True)
     hr_approved = models.BooleanField(null=True, blank=True)
 
     def __str__(self):
