@@ -154,7 +154,7 @@ class LeaveApplicationSerializer(serializers.ModelSerializer):
         read_only_fields = (
             'employee',
             'status',
-            'admin_approved',
+            'manager_approved',
             'hr_approved',
             'applied_date'
         )
@@ -167,10 +167,10 @@ class LeaveApplicationSerializer(serializers.ModelSerializer):
 #             "id",
 #             "leave_application",
 #             "status",
-#             "admin_approved",
+#             "manager_approved",
 #             "hr_approved"
 #         ]
-#         read_only_fields = ['admin_approved', 'hr_approved']
+#         read_only_fields = ['manager_approved', 'hr_approved']
 
 
 # def deduct_leave_balance(sender, instance, created, **kwargs):

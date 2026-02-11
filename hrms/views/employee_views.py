@@ -71,14 +71,14 @@ class RegisterAPIView(APIView):
     def post(self, request):
         try:
             user = request.user
-            if user.role and user.role.name  not in ['hr', 'admin']:
+            if user.role and user.role.name  not in ['HR', 'MANAGER']:
                    return Response({'error': 'Kindly contact with Administrator for the registration process.'}, status=status.HTTP_400_BAD_REQUEST)
 
             serializer = RegisterSerializer(data=request.data)
             if serializer.is_valid():
                 # return Response({'error': serializer.data}, status=status.HTTP_400_BAD_REQUEST)
                 user = serializer.save()               
-                if user.role and user.role.name == 'employee': 
+                if user.role and user.role.name == 'EMPLOYEE': 
                     employee_num = Employee.objects.order_by('-id').first()        
                     if employee_num and employee_num.employee_id:
                         try:
@@ -150,7 +150,7 @@ class UserAPIView(APIView):
     def get(self, request):
         try:
             user = request.user
-            if request.user.role and request.user.role.name not in ['HR', 'ADMIN']:
+            if request.user.role and request.user.role.name not in ['HR', 'MANAGER']:
                    return Response({'error': 'You do not have permission to view all users.'}, status=status.HTTP_403_FORBIDDEN)
             user = User.objects.all()
             serializer = UserSerializer(user, many=True)
@@ -349,7 +349,7 @@ class EmployeeApiView(APIView):
                     serializer.save()
                     return Response(serializer.data, status=status.HTTP_200_OK)
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            if user.role.name == "employee":
+            if user.role.name == "EMPLOYEE":
                 employee = Employee.objects.get(user=request.user)
                 serializer = EmployeeDetailesCheckBoxSerializer(data=request.data)
                 if serializer.is_valid():
@@ -385,7 +385,7 @@ class EmployeeEmergencyContactView(APIView):
                     serializer.save(employee=employee)
                     return Response(serializer.data, status=status.HTTP_201_CREATED)
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            if user.role.name == "employee":
+            if user.role.name == "EMPLOYEE":
                 employee = Employee.objects.get(user=request.user)
                 serializer = EmployeeDetailesCheckBoxSerializer(data=request.data)
                 if serializer.is_valid():
@@ -423,7 +423,7 @@ class EmployeeAddressIdentityRequestView(APIView):
                     serializer.save(employee=employee)
                     return Response(serializer.data, status=status.HTTP_201_CREATED)
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            if user.role.name == "employee":
+            if user.role.name == "EMPLOYEE":
                 employee = Employee.objects.get(user=request.user)
                 serializer = EmployeeDetailesCheckBoxSerializer(data=request.data)
                 if serializer.is_valid():
@@ -839,14 +839,14 @@ class WorkFromHomeApprovalView(APIView):
         # wfh_request = WorkFromHomeRequest.objects.get(employee__user=request.user)
         status_value = serializer.validated_data["status"]
 
-        # RULE 1: SPECIAL approval → ADMIN only
-        if wfh_request.approval_type == "SPECIAL" and role.name != "ADMIN":
-            return Response({"error": "Bulk WFH requests require ADMIN approval"},status=status.HTTP_403_FORBIDDEN)
+        # RULE 1: SPECIAL approval → MANAGER only
+        if wfh_request.approval_type == "SPECIAL" and role.name != "MANAGER":
+            return Response({"error": "Bulk WFH requests require MANAGER approval"},status=status.HTTP_403_FORBIDDEN)
 
         # if wfh_request.approval_type == "SPECIAL" and status_value == "APPROVED":
         #     return Response()
 
-        # RULE 2: NORMAL approval → ADMIN or HR
+        # RULE 2: NORMAL approval → MANAGER or HR
         if wfh_request.approval_type == "NORMAL" and role.name != "HR":
             return Response({"error": "Invalid approver role"},status=status.HTTP_403_FORBIDDEN)
 
@@ -861,12 +861,12 @@ class WorkFromHomeApprovalView(APIView):
                 wfh_request.status = "APPROVED"
                 wfh_request.save()
 
-            # NORMAL → admin approval is enough
-            if wfh_request.approval_type == "SPECIAL" and role.name == "ADMIN":
+            # NORMAL → manager approval is enough
+            if wfh_request.approval_type == "SPECIAL" and role.name == "MANAGER":
                 wfh_request.status = "APPROVED"
                 wfh_request.save()
 
-            # If admin approved but HR not
+            # If manager approved but HR not
             # if wfh_request.approval_type == "SPECIAL" and wfh_request.status == "APPROVED" and role.name != "HR":
             #     return Response({"error": "Invalid approver role"},status=status.HTTP_403_FORBIDDEN)
 
@@ -909,7 +909,7 @@ class LeaveRequestView(APIView):
         user = request.user
 
         # Role check
-        if user.role.name != "employee":
+        if user.role.name not in ["EMPLOYEE", "HR"]:
             return Response({"error": "Only employees can apply for leave"}, status=status.HTTP_403_FORBIDDEN)
         
         employee = Employee.objects.get(user=request.user)
@@ -1002,20 +1002,20 @@ class LeaveRequestView(APIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class AdminLeaveApproveAPIView(APIView):
+class ManagerLeaveApproveAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, leave_id):
         leave = LeaveApplication.objects.get(id=leave_id)
 
-        if leave.admin_approved:
-            return Response({"message": "Already approved by admin"}, status=400)
+        if leave.manager_approved:
+            return Response({"message": "Already approved by Manager"}, status=400)
 
-        leave.admin_approved = True
+        leave.manager_approved = True
         leave.status = 'APPROVED'
         leave.save()
 
-        return Response({"message": "Admin approved"}, status=200)
+        return Response({"message": "Manager approved"}, status=200)
 
 
 from django.db import transaction
@@ -1031,8 +1031,8 @@ class HRLeaveApproveAPIView(APIView):
         if leave.status == 'APPROVED':
             return Response({"message": "Already approved"}, status=400)
 
-        if not leave.admin_approved:
-            return Response({"message": "Admin approval required"}, status=400)
+        if not leave.manager_approved:
+            return Response({"message": "Manager approval required"}, status=400)
 
         leave.hr_approved = True
         leave.status = 'APPROVED'
@@ -1135,7 +1135,7 @@ class CompOffCreditAPIView(APIView):
         user = request.user
 
         # Role check
-        if user.role.name not in ["hr", "admin"]:
+        if user.role.name not in ["HR", "MANAGER"]:
             return Response(
                 {"error": "You are not allowed to credit Comp-Off"},
                 status=status.HTTP_403_FORBIDDEN
