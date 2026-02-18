@@ -9,15 +9,18 @@ from django.conf import settings
 class Role(models.Model):
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True, null=True)
+    status = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='role_created_by')
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='role_updated_by')
+    
 
     def __str__(self):
         return self.name
     
 class User(AbstractUser):
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True)
-    created_at = models.DateTimeField(default=timezone.now)
     username = models.CharField(max_length=150, unique=True, null=True, blank=True)
     password = models.CharField(max_length=128, null=True, blank=True)
     first_name = models.CharField(max_length=150, blank=True, null=True)
@@ -26,6 +29,7 @@ class User(AbstractUser):
     email = models.EmailField(blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_login = models.DateTimeField(auto_now=True, null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         return self.username
@@ -36,7 +40,7 @@ class EmailOTP(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     def is_expired(self):
-        return (timezone.now() - self.created_at).total_seconds() > 600  
+        return (timezone.now() - self.created_at).total_seconds() > 600
     
 class MobileOTP(models.Model):
     mobile_number = models.CharField(max_length=15)
@@ -47,6 +51,7 @@ class MobileOTP(models.Model):
 class Employee(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee', null=True, blank=True)
     username = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee_username', null=True, blank=True)
+    # entity = models.CharField(max_length=100, null=True, blank=True)
     employee_id = models.CharField(max_length=50, unique=True, null=True, blank=True, editable=False)
     full_name = models.CharField(max_length=30)
     email = models.EmailField(unique=True)
@@ -60,7 +65,7 @@ class Employee(models.Model):
     mobile_number = models.CharField(max_length=15, null=True, blank=True)
     
     def __str__(self):
-        return self.full_name
+        return  self.full_name
     
 class EmployeeEmergencyContact(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
@@ -116,7 +121,8 @@ class Attendance(models.Model):
         ('Work From Home', 'Work From Home'),
         ('Half Day', 'Half Day'),
     ]
-    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, null=True, blank=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     date = models.DateField()
     check_in_time = models.TimeField(timezone.now, null=True)
     check_out_time = models.TimeField(timezone.now, null=True)
@@ -127,7 +133,7 @@ class Attendance(models.Model):
         ordering = ["-date"]
 
     def __str__(self):
-        return f"{self.employee} - {self.date}"
+        return f"{self.employee} - {self.date} - {self.user}"
 
 
 class WorkFromHomeRequest(models.Model):
@@ -137,7 +143,7 @@ class WorkFromHomeRequest(models.Model):
         ('APPROVED', 'Approved'),
         ('REJECTED', 'Rejected'),
     ]
-    
+
     APPROVAL_TYPE =[
         ("NORMAL","Normal"),("SPECIAL","Special")
     ]
@@ -173,7 +179,7 @@ class WorkFromHomeApproval(models.Model):
 # User = settings.AUTH_USER_MODEL
 
 # class LeaveType(models.Model):
-    
+
 
 #     def __str__(self):
 #         return self.leave_type
@@ -181,17 +187,20 @@ class WorkFromHomeApproval(models.Model):
 
 class EmployeeLeaveBalance(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
-
     casual_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=11)
     sick_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=11)
-    optional_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=2)
+    optional_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     compoff_balance = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    available_balance = models.DecimalField(max_digits=5, decimal_places=2, default=24)
+    available_balance = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 
     def __str__(self):
-        return self.employee
-
+        return str(self.employee)
     
+    def save(self, *args, **kwargs):
+        self.available_balance = self.casual_leave_balance + self.sick_leave_balance + self.optional_leave_balance
+        super().save(*args, **kwargs)
+
+
 class LeaveApplication(models.Model):
     STATUS_CHOICES = (
         ('PENDING', 'Pending'),
@@ -230,4 +239,32 @@ class LeaveApplication(models.Model):
 
     def __str__(self):
         return f"{self.employee} - {self.leave_type} ({self.status})"
+    
+
+class Holiday(models.Model):
+    HOLIDAY_TYPE = [
+        ('NATIONAL', 'NATIONAL'),
+        ('FESTIVAL', 'FESTIVAL'),
+        ('COMPANY', 'COMPANY'),
+    ]
+
+    name = models.CharField(max_length=100)
+    type = models.CharField(max_length=50, choices=HOLIDAY_TYPE, null=True, blank=True)
+    description = models.TextField(blank=True, null=True)
+    date = models.JSONField(null=True, blank=True)
+    optional_holiday = models.BooleanField(default=False)
+    status = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='holiday_created_by')
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='holiday_updated_by')
+
+    def __str__(self):
+        return f"{self.name} - {self.date} - {self.optional_holiday}"
+    
+class HrManagement(models.Model):
+  
+
+    def __str__(self):
+        return f"{self.employee} - {self.designation} - {self.department}"
 

@@ -97,6 +97,7 @@ class EmployeeDetailesCheckBoxSerializer(serializers.ModelSerializer):
 
 class AttendanceSerializer(serializers.ModelSerializer):
     employee = serializers.StringRelatedField(read_only=True)
+    user = serializers.StringRelatedField(read_only=True)
     total_duration = serializers.DurationField(read_only=True)
     status = serializers.CharField(read_only=True)
 
@@ -141,10 +142,12 @@ class WorkFromHomeApprovalSerializer(serializers.ModelSerializer):
 class EmployeeLeaveBalanceSerializer(serializers.ModelSerializer):
     # leave_type = LeaveTypeSerializer(read_only=True)
     leave_application = serializers.StringRelatedField(read_only=True)
+    user = serializers.StringRelatedField(source='employee.user', read_only=True)
+    available_balance = 'casual_leave_balance' + 'sick_leave_balance' + 'optional_leave_balance'
     class Meta:
         model = EmployeeLeaveBalance
         fields = '__all__'
-        read_only_fields = ['leave_application']
+        read_only_fields = ['leave_application', 'employee', 'user']
 
 class LeaveApplicationSerializer(serializers.ModelSerializer):
 
@@ -213,25 +216,6 @@ class LeaveApplicationSerializer(serializers.ModelSerializer):
 #         balance.available_balance -= days
 #         balance.save()
 
-
-
-# Employee Apply
-#    ↓
-# Validation (Balance + Overlap + Half Day)
-#    ↓
-# Status = PENDING
-#    ↓
-# admin Approves
-#    ↓
-# HR Approves
-#    ↓
-# Leave Approved
-#    ↓
-# Leave Balance Deducted
-
-
-
-
     # def validate(self, attrs):
     #     employee = self.context['request'].user
     #     leave_type = attrs['leave_type']
@@ -276,3 +260,20 @@ class LeaveApplicationSerializer(serializers.ModelSerializer):
     #         raise serializers.ValidationError("Insufficient total balance")
 
     #     return attrs
+
+
+class HolidaySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Holiday
+        fields = '__all__'
+
+    def get_details(self, obj):
+        return {
+            "date": obj.date,
+        }
+    
+
+class HrManagementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HrManagement
+        fields = '__all__'

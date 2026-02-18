@@ -8,6 +8,7 @@ import random
 import requests
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db.models import Sum
 from hrms.models import Role, MobileOTP, EmailOTP, Employee
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from hrms.serializers.emp_serializers import *
@@ -17,6 +18,7 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.shortcuts import get_object_or_404
 from django.contrib.postgres.search import SearchVector
 from rest_framework.parsers import MultiPartParser, FormParser
+from django.db import transaction
 # from django.contrib.auth.models import User
 # from django.contrib.auth import authenticate
 # from crm.models import()
@@ -29,7 +31,7 @@ class RoleAPIView(APIView):
 
     def get(self, request):
         try:
-            role = Role.objects.all()
+            role = Role.objects.filter(status=True)
             serializer = RoleSerializer(role, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
@@ -37,6 +39,9 @@ class RoleAPIView(APIView):
         
     def post(self, request):
         try:
+            user = request.user
+            if user.role.name not in ["HR", "MANAGER"]:
+                return Response({'error': 'You are not authorized to create roles'}, status=status.HTTP_403_FORBIDDEN)
             serializer = RoleSerializer(data=request.data)
             if serializer.is_valid():
                 serializer.save()
@@ -47,7 +52,13 @@ class RoleAPIView(APIView):
         
     def put(self, request, pk):
         try:
-            role = Role.objects.get(id=pk)
+            user = request.user
+            if user.role.name not in ["HR", "MANAGER"]:
+                return Response({'error': 'You are not authorized to update roles'}, status=status.HTTP_403_FORBIDDEN)
+            try:
+                role = Role.objects.get(pk=pk, status=True)
+            except Role.DoesNotExist:
+                return Response({'error': 'Role not found'}, status=status.HTTP_404_NOT_FOUND)
             serializer = RoleSerializer(role, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
@@ -56,10 +67,20 @@ class RoleAPIView(APIView):
         except Role.DoesNotExist:
             return Response({'error': 'Role does not Exists'}, status=status.HTTP_404_NOT_FOUND)
         
+        
     def delete(self, request, pk):
         try:
-            role = Role.objects.get(id=pk)
-            role.delete()
+            user = request.user
+            if user.role.name not in ["HR", "MANAGER"]:
+                return Response({'error': 'You are not authorized to delete roles'}, status=status.HTTP_403_FORBIDDEN)
+            try:
+                role = Role.objects.get(pk=pk)
+            except Role.DoesNotExist:
+                return Response({'error': 'Role not found'}, status=status.HTTP_404_NOT_FOUND)
+            if role.status == False:
+                return Response({'error': f'{role.name} Role is already deleted'}, status=status.HTTP_400_BAD_REQUEST)
+            role.status = False
+            role.save()
             return Response({'message': 'Role deleted successfully'}, status=status.HTTP_200_OK)
         except Role.DoesNotExist:
             return Response({'error': 'Role does not Exists'}, status=status.HTTP_404_NOT_FOUND)
@@ -76,6 +97,13 @@ class RegisterAPIView(APIView):
 
             serializer = RegisterSerializer(data=request.data)
             if serializer.is_valid():
+
+                email_id = serializer.validated_data.get('email')
+                email = User.objects.annotate(search=SearchVector('email')).filter(search=email_id)
+
+                if email.exists() and email.first().email == email_id:
+                    return Response({'error': 'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+                
                 # return Response({'error': serializer.data}, status=status.HTTP_400_BAD_REQUEST)
                 user = serializer.save()               
                 if user.role and user.role.name == 'EMPLOYEE': 
@@ -88,12 +116,19 @@ class RegisterAPIView(APIView):
                             employee_id = "EMP001"
                     else:
                         employee_id = "EMP001"
+
+                    # available_balance = 
+                    # print(user.id)
                     Employee.objects.create(
                         user=user,
                         employee_id=employee_id,
                         full_name=user.get_full_name()or user.username,
                         email=user.email,
                         mobile_number=user.mobile_number,
+                        )
+                    
+                    EmployeeLeaveBalance.objects.create(
+                        employee=employee_num,
                         )
                 return Response(
                     {
@@ -119,7 +154,7 @@ class LoginAPIView(APIView):
 
     def post(self, request):
         try:
-            username = request.data.get('username')
+            # username = request.data.get('username')
             # user = User.objects.get(username=username)
 
             serializer = LoginSerializer(data=request.data)
@@ -158,6 +193,53 @@ class UserAPIView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class LoginWithOTPApiView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        try:
+            mobile_number = request.data.get('mobile_number')
+            email_id = request.data.get('email_id')
+            if not mobile_number:
+                return Response({'error': 'Mobile number is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                user = User.objects.get(mobile_number=mobile_number)
+            except User.DoesNotExist:
+                return Response({'error': 'User with this mobile number does not exist'}, status=status.HTTP_404_NOT_FOUND)
+
+            otp = str(random.randint(100000, 999999))
+            MobileOTP.objects.create(mobile_number=mobile_number, otp=otp, created_at=datetime.now())
+
+            sms_message = f"Your OTP for login is {otp}. Valid for 10 mins. SumCircle"
+            params = {
+                "usersName": settings.VASBAY_USERNAME,
+                "key": settings.VASBAY_API_KEY,
+                "route": 2,
+                "message": sms_message,
+                "numbers": mobile_number,
+                "senderId": settings.VASBAY_SENDER_ID,
+                "entityId": settings.VASBAY_ENTITY_ID,
+                "contentId": settings.VASBAY_CONTENT_ID
+            }
+            response = requests.get(settings.VASBAY_API_URL, params=params, timeout=10)
+            data = response.json()
+            sms_status = ""
+            msg = data.get("msg")
+            if isinstance(msg, dict):
+                response_block = msg.get("response")
+                if isinstance(response_block, dict):
+                    sms_status = response_block.get("0", {}).get("status", "")
+            elif isinstance(msg, str):
+                sms_status = msg
+
+            if sms_status in ["Sent", "Delivered"]:
+                return Response({"message": "OTP sent to mobile."}, status=status.HTTP_200_OK)
+            else:
+                return Response({"error": "Failed to send OTP.", "status": sms_status}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class ForgetPasswordView(APIView):
     """
@@ -169,19 +251,24 @@ class ForgetPasswordView(APIView):
     """
 
     def post(self, request):
-        method = request.data.get("method")       # 'email' or 'mobile'
-        email_id = request.data.get("email_id")  # email or mobile
+        email_id = request.data.get("email_id")  
+        mobile_number = request.data.get("mobile_number")
+        print(email_id, mobile_number)
+
+        if not email_id and not mobile_number:
+            return Response({"error": "Either email_id or mobile_number is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if email_id:
+            method = "email"
+        elif mobile_number:
+            method = "mobile"
+            
         otp = request.data.get("otp")
         new_password = request.data.get("new_password")
         confirm_password = request.data.get("confirm_password")
 
         email = User.objects.annotate(search=SearchVector('email')).filter(search=email_id)
-        
-        if not method or not email_id:
-            return Response({"error": "Method and email_id are required."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        if not email.exists():
-            return Response({"error": "Given email ID does not exist"}, status=status.HTTP_400_BAD_REQUEST)
+        mobile = User.objects.annotate(search=SearchVector('mobile_number')).filter(search=mobile_number)
 
         # Step 1: Generate & send OTP
         if not otp:
@@ -204,9 +291,9 @@ class ForgetPasswordView(APIView):
 
             elif method == "mobile":
                 # Remove previous OTP
-                MobileOTP.objects.filter(mobile_number=email_id).delete()
+                MobileOTP.objects.filter(mobile_number=mobile_number).delete()
                 # Save OTP
-                MobileOTP.objects.create(mobile_number=email_id, otp=generated_otp, created_at=datetime.now())
+                MobileOTP.objects.create(mobile_number=mobile_number, otp=generated_otp, created_at=datetime.now())
 
                 # Send SMS via Vasbay
                 sms_message = f"Your OTP is {generated_otp}. Valid for 10 mins. SumCircle"
@@ -215,7 +302,7 @@ class ForgetPasswordView(APIView):
                     "key": settings.VASBAY_API_KEY,
                     "route": 2,
                     "message": sms_message,
-                    "numbers": email_id,
+                    "numbers": mobile_number,
                     "senderId": settings.VASBAY_SENDER_ID,
                     "entityId": settings.VASBAY_ENTITY_ID,
                     "contentId": settings.VASBAY_CONTENT_ID
@@ -255,7 +342,7 @@ class ForgetPasswordView(APIView):
                 if method == "email":
                     otp_obj = EmailOTP.objects.get(email=email_id)
                 else:
-                    otp_obj = MobileOTP.objects.get(mobile_number=email_id)
+                    otp_obj = MobileOTP.objects.get(mobile_number=mobile_number)
             except (EmailOTP.DoesNotExist, MobileOTP.DoesNotExist):
                 return Response({"error": "OTP not found."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -271,7 +358,7 @@ class ForgetPasswordView(APIView):
                 if method == "email":
                     user = User.objects.get(email=email_id)
                 else:
-                    user = User.objects.get(mobile_number=email_id)
+                    user = User.objects.get(mobile_number=mobile_number)
                 user.password = make_password(new_password)
                 user.save()
                 otp_obj.delete()
@@ -615,11 +702,15 @@ class AttendanceApiView(APIView):
         
     def post(self, request, *args, **kwargs):
         try:
+            user = request.user
+            print(user)
+            print(user.id)
+            # if user.role.name != "EMPLOYEE":
             # FULL_DAY_HOURS = timedelta(hours=8, minutes=45)
             serializer = AttendanceSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
         
-            employee = Employee.objects.get(user=request.user)
+            employee = Employee.objects.filter(user=user).first()
         
             check_in_dt = serializer.validated_data.get("check_in_time")
         
@@ -635,6 +726,7 @@ class AttendanceApiView(APIView):
                 ))
         
             attendance = Attendance.objects.create(
+                user=user,
                 employee=employee,
                 date=serializer.validated_data["date"],
                 check_in_time=check_in_td
@@ -647,6 +739,7 @@ class AttendanceApiView(APIView):
 
     def patch(self, request, pk):
         try:
+            user = request.user
             FULL_DAY_HOURS = timedelta(hours=8, minutes=45)
             serializer = AttendanceSerializer(data=request.data)
             if serializer.is_valid(raise_exception= True):
@@ -654,7 +747,8 @@ class AttendanceApiView(APIView):
                 # check_in_time = serializer.validated_data.get("check_in_time")
                 check_out_time = serializer.validated_data.get("check_out_time")
                 date = serializer.validated_data.get("date")
-                employee = Employee.objects.get(pk=pk)
+
+                employee = Employee.objects.filter(user=user).first()
                 total_duration = timedelta(0)
                 try:
                     attendance = Attendance.objects.get(employee=employee, date=date)
@@ -676,6 +770,7 @@ class AttendanceApiView(APIView):
                         minutes=check_out_time.minute,
                         seconds=check_out_time.second,
                     )
+
                 total_duration = check_out_time_total - check_in_time_total
         
                 if total_duration >= FULL_DAY_HOURS:
@@ -686,6 +781,7 @@ class AttendanceApiView(APIView):
         
                 attendance, created = Attendance.objects.update_or_create(
                     employee=employee,
+                    user=user,
                     date=date,
                     # check_in_time=check_in_time,
                     defaults={
@@ -885,21 +981,21 @@ class WorkFromHomeApprovalView(APIView):
         return Response(WorkFromHomeApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
 
 
-class EmployeeLeaveBalanceViewSet(APIView):
-    permission_classes = [IsAuthenticated]
+# class EmployeeLeaveBalanceViewSet(APIView):
+#     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
-        employee = Employee.objects.get(user=request.user)
-        queryset = EmployeeLeaveBalance.objects.filter(employee=employee)
-        available_balance = queryset.first()
-        serializer = EmployeeLeaveBalanceSerializer(instance=available_balance, context={'available_balance': available_balance}, data=request.data, partial=True)
-        # serializer = EmployeeLeaveBalanceSerializer(queryset, data=request.data)
-        if serializer.is_valid():
-            optional_leave = serializer.validated_data.get('optional_leave_balance')
-
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#     def post(self, request):
+#         employee = Employee.objects.get(user=request.user)
+#         queryset = EmployeeLeaveBalance.objects.filter(employee=employee)
+#         available_balance = queryset.first()
+#         serializer = EmployeeLeaveBalanceSerializer(instance=available_balance, context={'available_balance': available_balance}, data=request.data, partial=True)
+#         # if optional_holiday is true in holiday table then all that holiday count and then make it equal to optional leave balance in employee leave balance table and then minus all the optional leave applied by employee in leave application table with status approved and then update the optional leave balance in employee leave balance table
+        
+#         # serializer = EmployeeLeaveBalanceSerializer(queryset, data=request.data)
+#         if serializer.is_valid():
+#             serializer.save()
+#             return Response(serializer.data, status=status.HTTP_201_CREATED)
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class LeaveRequestView(APIView):
@@ -913,7 +1009,6 @@ class LeaveRequestView(APIView):
             return Response({"error": "Only employees can apply for leave"}, status=status.HTTP_403_FORBIDDEN)
         
         employee = Employee.objects.get(user=request.user)
-        
         
         data = request.data
 
@@ -972,7 +1067,7 @@ class LeaveRequestView(APIView):
         # print(employee)
 
         # Balance validation
-        try:    
+        try:
             balance = EmployeeLeaveBalance.objects.get(employee=employee)
         except EmployeeLeaveBalance.DoesNotExist:
             return Response({"error": "Leave balance not initialized for this employee"},status=status.HTTP_400_BAD_REQUEST)
@@ -980,26 +1075,25 @@ class LeaveRequestView(APIView):
         # print(balance)
 
         if leave_type.leave_type == 'Casual' and balance.casual_leave_balance < total_days:
-            return Response({"error": "Insufficient Casual Leave"}, status=400)
+            return Response({"error": "Insufficient Casual Leave"}, status=status.HTTP_400_BAD_REQUEST)
 
         if leave_type.leave_type == 'Sick' and balance.sick_leave_balance < total_days:
-            return Response({"error": "Insufficient Sick Leave"}, status=400)
+            return Response({"error": "Insufficient Sick Leave"}, status=status.HTTP_400_BAD_REQUEST)
 
         if leave_type.leave_type == 'Optional' and balance.optional_leave_balance < total_days:
-            return Response({"error": "Insufficient Optional Leave"}, status=400)
+            return Response({"error": "Insufficient Optional Leave"}, status=status.HTTP_400_BAD_REQUEST)
 
         if leave_type.leave_type == 'CompOff' and balance.compoff_balance < total_days:
-            return Response({"error": "Insufficient Comp-Off balance"}, status=400)
+            return Response({"error": "Insufficient Comp-Off balance"}, status=status.HTTP_400_BAD_REQUEST)
 
         if balance.available_balance < total_days:
-            return Response({"error": "Insufficient total balance"}, status=400)
+            return Response({"error": "Insufficient total balance"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Save leave application
         serializer = LeaveApplicationSerializer(data=data)
         if serializer.is_valid():
             serializer.save(employee=employee)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class ManagerLeaveApproveAPIView(APIView):
@@ -1009,16 +1103,13 @@ class ManagerLeaveApproveAPIView(APIView):
         leave = LeaveApplication.objects.get(id=leave_id)
 
         if leave.manager_approved:
-            return Response({"message": "Already approved by Manager"}, status=400)
+            return Response({"message": "Already approved by Manager"}, status=status.HTTP_400_BAD_REQUEST)
 
         leave.manager_approved = True
         leave.status = 'APPROVED'
         leave.save()
 
-        return Response({"message": "Manager approved"}, status=200)
-
-
-from django.db import transaction
+        return Response({"message": "Manager approved"}, status=status.HTTP_200_OK)
 
 class HRLeaveApproveAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1029,10 +1120,10 @@ class HRLeaveApproveAPIView(APIView):
         leave = LeaveApplication.objects.select_for_update().get(id=leave_id)
 
         if leave.status == 'APPROVED':
-            return Response({"message": "Already approved"}, status=400)
+            return Response({"message": "Already approved"}, status=status.HTTP_400_BAD_REQUEST)
 
         if not leave.manager_approved:
-            return Response({"message": "Manager approval required"}, status=400)
+            return Response({"message": "Manager approval required"}, status=status.HTTP_400_BAD_REQUEST)
 
         leave.hr_approved = True
         leave.status = 'APPROVED'
@@ -1048,15 +1139,15 @@ class HRLeaveApproveAPIView(APIView):
             balance.casual_leave_balance -= days
         elif leave.leave_type == 'Sick':
             balance.sick_leave_balance -= days
-        elif leave.leave_type == 'Optional':
-            balance.optional_leave_balance -= days
+        # elif leave.leave_type == 'Optional':
+        #     balance.optional_leave_balance -= days
         elif leave.leave_type == 'CompOff':
             balance.compoff_balance -= days
         
         balance.available_balance -= days
         balance.save()
 
-        return Response({"message": "Leave approved & balance deducted"}, status=200)
+        return Response({"message": "Leave approved & balance deducted"}, status=status.HTTP_200_OK)
 
 
 class LeaveRejectAPIView(APIView):
@@ -1066,12 +1157,12 @@ class LeaveRejectAPIView(APIView):
         leave = LeaveApplication.objects.get(id=leave_id)
 
         if leave.status == 'APPROVED':
-            return Response({"message": "Approved leave cannot be rejected"}, status=400)
+            return Response({"message": "Approved leave cannot be rejected"}, status=status.HTTP_400_BAD_REQUEST)
 
         leave.status = 'REJECTED'
         leave.save()
 
-        return Response({"message": "Leave rejected"}, status=200)
+        return Response({"message": "Leave rejected"}, status=status.HTTP_200_OK)
 
 
 class LeaveCancelAPIView(APIView):
@@ -1088,7 +1179,7 @@ class LeaveCancelAPIView(APIView):
         if leave.status != 'APPROVED':
             leave.status = 'CANCELLED'
             leave.save()
-            return Response({"message": "Leave cancelled"}, status=200)
+            return Response({"message": "Leave cancelled"}, status=status.HTTP_200_OK)
 
         balance = EmployeeLeaveBalance.objects.select_for_update().get(
             employee=request.user
@@ -1100,8 +1191,8 @@ class LeaveCancelAPIView(APIView):
             balance.casual_leave_balance += days
         elif leave.leave_type == 'Sick':
             balance.sick_leave_balance += days
-        elif leave.leave_type == 'Optional':
-            balance.optional_leave_balance += days
+        # elif leave.leave_type == 'Optional':
+        #     balance.optional_leave_balance += days
         elif leave.leave_type == 'CompOff':
             balance.compoff_balance += days
         
@@ -1111,7 +1202,7 @@ class LeaveCancelAPIView(APIView):
         leave.status = 'CANCELLED'
         leave.save()
 
-        return Response({"message": "Leave cancelled & balance reverted"}, status=200)
+        return Response({"message": "Leave cancelled & balance reverted"}, status=status.HTTP_200_OK)
 
 # class CompOffCreditAPIView(APIView):
 #     permission_classes = [IsAuthenticated]
@@ -1126,7 +1217,7 @@ class LeaveCancelAPIView(APIView):
 #         balance.available_balance += days
 #         balance.save()
 
-#         return Response({"message": f"{days} Comp-Off credited"}, status=200)
+#         return Response({"message": f"{days} Comp-Off credited"}, status=status.HTTP_200_OK)
 
 class CompOffCreditAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1136,57 +1227,40 @@ class CompOffCreditAPIView(APIView):
 
         # Role check
         if user.role.name not in ["HR", "MANAGER"]:
-            return Response(
-                {"error": "You are not allowed to credit Comp-Off"},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            return Response({"error": "You are not allowed to credit Comp-Off"}, status=status.HTTP_403_FORBIDDEN)
 
         employee_id = request.data.get("employee_id")
         days = request.data.get("days", 1)
 
         # Validation
         if not employee_id:
-            return Response(
-                {"error": "employee_id is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "employee_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             days = int(days)
             if days <= 0:
                 raise ValueError
         except ValueError:
-            return Response(
-                {"error": "days must be a positive integer"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "days must be a positive integer"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             balance = EmployeeLeaveBalance.objects.get(employee_id=employee_id)
         except EmployeeLeaveBalance.DoesNotExist:
-            return Response(
-                {"error": "Employee not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
 
         # Credit comp-off
         balance.compoff_balance += days
         balance.available_balance += days
         balance.save()
 
-        return Response(
-            {"message": f"{days} Comp-Off credited successfully"},
-            status=status.HTTP_200_OK
-        )
+        return Response({"message": f"{days} Comp-Off credited successfully"}, status=status.HTTP_200_OK)
 
 
 
 @transaction.atomic
 def approve_leave(leave):
 
-    balance = EmployeeLeaveBalance.objects.select_for_update().get(
-        employee=leave.employee
-    )
+    balance = EmployeeLeaveBalance.objects.select_for_update().get(employee=leave.employee)
 
     days = leave.total_days
     lt = leave.leave_type.leave_type
@@ -1197,8 +1271,8 @@ def approve_leave(leave):
     elif lt == 'Sick':
         balance.sick_leave_balance -= days
 
-    elif lt == 'Optional':
-        balance.optional_leave_balance -= days
+    # elif lt == 'Optional':
+    #     balance.optional_leave_balance -= 2 * days
 
     elif lt == 'CompOff':
         balance.compoff_balance -= days
@@ -1220,21 +1294,132 @@ def cancel_leave(leave):
         balance.casual_leave_balance += days
     elif lt == 'Sick':
         balance.sick_leave_balance += days
-    elif lt == 'Optional':
-        balance.optional_leave_balance += days
+    # elif lt == 'Optional':
+    #     balance.optional_leave_balance += days
     elif lt == 'CompOff':
         balance.compoff_balance += days
 
     balance.available_balance += days
     balance.save()
 
+@transaction.atomic
+def optional_leave(leave):
 
+    balance = EmployeeLeaveBalance.objects.select_for_update().get(employee=leave.employee)
+    attendance = Attendance.objects.get(employee=leave.employee, date=leave.from_date, status="PRESENT")
 
+    if attendance and leave.date == attendance.date and leave.leave_type == "Optional" and attendance.status == "ABSENT":
+        days = leave.total_days
+        balance.optional_leave_balance -= 2*days
+        balance.available_balance -= days    
+        balance.save()
 
-# if leave_type.leave_type == 'Optional':
-#     if balance.optional_leave_balance >= days:
-#         balance.optional_leave_balance -= days
-#     elif balance.compoff_balance >= days:
-#         balance.compoff_balance -= days
-#     else:
-#         raise ValidationError("No Optional or CompOff balance")
+class HolidayViewSet(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            holidays = Holiday.objects.filter(status=True)
+            serializer = HolidaySerializer(holidays, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        user = request.user
+        
+
+        if user.role.name not in ["HR", "MANAGER"]:
+            return Response({'error': 'You are not authorized to create holidays'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = HolidaySerializer(data=request.data)
+        # employee = Employee.objects.filter()
+        # if serializer.is_valid():
+        #     print(employee)
+        #     queryset_1 = EmployeeLeaveBalance.objects.all()
+        #     print(queryset_1)
+        #     available_balance = queryset_1.first()
+        #     print(available_balance)
+        #     optional_leave = serializer.validated_data.get('optional_holiday', 0)
+        #     print(optional_leave)
+        #     optional_leave_balance = available_balance.optional_leave_balance if available_balance else 0
+        #     optional_leave_balance += optional_leave
+        #     print(optional_leave_balance)
+        #     approved_optional_leave = LeaveApplication.objects.filter(employee=employee, leave_type='Optional', status='APPROVED').aggregate(total=Sum('total_days'))['total'] or 0
+        #     print(approved_optional_leave)
+        #     optional_leave_balance -= approved_optional_leave
+        #     print(optional_leave_balance)
+
+        # return Response(serializer.data, status=status.HTTP_201_CREATED)
+        # EmployeeLeaveBalance.objects.update_or_create(
+        #     # employee=employee.all(),
+        #     defaults={'optional_leave_balance': optional_leave_balance}
+        # )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def put(self, request, pk):
+        user = request.user
+        if user.role.name not in ["HR", "MANAGER"]:
+            return Response({'error': 'You are not authorized to update holidays'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            holiday = Holiday.objects.get(pk=pk, status=True)
+        except Holiday.DoesNotExist:
+            return Response({'error': 'Holiday not found'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = HolidaySerializer(holiday, data=request.data, partial=True)
+        if serializer.is_valid():
+            optional_holiday = serializer.validated_data.get('optional_holiday', None)
+            if optional_holiday == True:
+                # Update optional leave balance for all employees
+                queryset = EmployeeLeaveBalance.objects.all()
+                for balance in queryset:
+                    balance.optional_leave_balance += 1
+                    balance.save()
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk):
+        user = request.user
+        if user.role.name not in ["HR", "MANAGER"]:
+            return Response({'error': 'You are not authorized to delete holidays'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            holiday = Holiday.objects.get(pk=pk)
+        except Holiday.DoesNotExist:
+            return Response({'error': 'Holiday not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # status_value = request.data.get("status")
+        if holiday.status == False:
+            return Response({'error': f'{holiday.name} Holiday is already deleted'}, status=status.HTTP_400_BAD_REQUEST)
+        holiday.status = False
+        holiday.save()
+        return Response({'message': 'Holiday deleted successfully'}, status=status.HTTP_200_OK)
+    
+class HrManagementAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if user.role.name not in ["HR", "MANAGER"]:
+            return Response({'error': 'You are not authorized to create HR management entries'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = HrManagementSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def put(self, request, pk):
+        user = request.user
+        if user.role.name not in ["HR", "MANAGER"]:
+            return Response({'error': 'You are not authorized to update HR management entries'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            hr_entry = HrManagement.objects.get(pk=pk)
+        except HrManagement.DoesNotExist:
+            return Response({'error': 'HR management entry not found'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = HrManagementSerializer(hr_entry, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

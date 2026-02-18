@@ -32,7 +32,7 @@ urlpatterns = [
 
     # Leave Management
     # path('leave_type/', LeaveTypeViewSet.as_view(), name='leave_type'),
-    path('leave_balance/', EmployeeLeaveBalanceViewSet.as_view(), name='leave_balance'),
+    # path('leave_balance/', EmployeeLeaveBalanceViewSet.as_view(), name='leave_balance'),
     path('leave_request/', LeaveRequestView.as_view(), name='leave_request'),
     path('leave_request/<int:pk>/', LeaveRequestView.as_view(), name='leave_request_detail'),
     path('manager_leave_approval/', ManagerLeaveApproveAPIView.as_view(), name='manager_leave_approval'),
@@ -46,14 +46,14 @@ urlpatterns = [
     path('leave_approval_compoff/', CompOffCreditAPIView.as_view(), name='leave_approval_compoff'),
     path('leave_approval_compoff/<int:leave_id>/', CompOffCreditAPIView.as_view(), name='leave_approval_compoff_detail'),
 
-    # Holiday Management
-    # path('holiday/', HolidayViewSet.as_view(), name='holiday'),
+    #Holiday Management
+    path('holiday/', HolidayViewSet.as_view(), name='holiday'),
+    path('holiday/<int:pk>/', HolidayViewSet.as_view(), name='holiday_detail'),
+
+    # Hr Management and Master Panel
+    path('hr_management/', HrManagementAPIView.as_view(), name = 'hr_management'),
 
     # Salary Management
     # path('salary/', SalaryViewSet.as_view(), name='salary'),
-
-    # Hr Management and Master Panel
-    # path('department/', DepartmentViewSet.as_view(), name='department'),
-    # path('designation/', DesignationViewSet.as_view(), name='designation'),
 
 ]
