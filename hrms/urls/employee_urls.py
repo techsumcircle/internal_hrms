@@ -56,4 +56,6 @@ urlpatterns = [
     # Salary Management
     # path('salary/', SalaryViewSet.as_view(), name='salary'),
 
+    path('employee_whatsapp_message', whatsappAPIView.as_view(), name = 'birthday_message')
+
 ]

@@ -272,8 +272,3 @@ class HolidaySerializer(serializers.ModelSerializer):
             "date": obj.date,
         }
     
-
-class HrManagementSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = HrManagement
-        fields = '__all__'

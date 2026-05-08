@@ -176,13 +176,7 @@ class WorkFromHomeApproval(models.Model):
     def __str__(self):
         return f"{self.wfh_request} - {self.status_choices}"
 
-# User = settings.AUTH_USER_MODEL
 
-# class LeaveType(models.Model):
-
-
-#     def __str__(self):
-#         return self.leave_type
 
 
 class EmployeeLeaveBalance(models.Model):
@@ -262,9 +256,5 @@ class Holiday(models.Model):
     def __str__(self):
         return f"{self.name} - {self.date} - {self.optional_holiday}"
     
-class HrManagement(models.Model):
-  
 
-    def __str__(self):
-        return f"{self.employee} - {self.designation} - {self.department}"
 
