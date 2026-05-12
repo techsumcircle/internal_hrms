@@ -56,6 +56,33 @@ urlpatterns = [
     # Salary Management
     # path('salary/', SalaryViewSet.as_view(), name='salary'),
 
-    path('employee_whatsapp_message', whatsappAPIView.as_view(), name = 'birthday_message')
+    path('send-birthday-whatsapp/', WhatsAppAPIView.as_view(), name = 'send-birthday-whatsapp'),
+
+
+
+
+    ##library_system
+
+     # BOOKS (manual clean endpoints)
+    path('books/', BookViewSet.as_view({'get': 'list', 'post': 'create'})),
+    path('books/<int:pk>/', BookViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'})),
+    path('books/search/', BookViewSet.as_view({'get': 'search'})),
+
+    # ISSUE SYSTEM
+    path('issue-book/', IssueBookView.as_view()),
+    path('my-books/', MyBooksView.as_view()),
+    path('return-book/', ReturnBookView.as_view()),
+
+    # ADMIN
+    # path('admin/users/', AdminUserViewSet.as_view({'get': 'list', 'post': 'create'})),
+    # path('admin/users/<int:pk>/', AdminUserViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'})),
+
+    path('admin/issues/', AdminIssueViewSet.as_view({'get': 'list'})),
+    path('admin/issues/active/', AdminIssueViewSet.as_view({'get': 'active'})),
+    path('admin/issues/<int:pk>/', AdminIssueViewSet.as_view({'get': 'retrieve'})),
+
+    path('admin/reports/', AdminReportsView.as_view()),
+
+    
 
 ]

@@ -272,3 +272,224 @@ class HolidaySerializer(serializers.ModelSerializer):
             "date": obj.date,
         }
     
+
+
+
+### Pageflow
+
+
+class UserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            'id',
+            'username',
+            'email',
+            'password',
+            'role',
+            'department',
+            'first_name',
+            'last_name',
+            'date_joined',
+            'is_active',
+        ]
+        read_only_fields = ['id', 'date_joined', 'is_active']
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        user = User(**validated_data)
+        user.set_password(password)
+        user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if password:
+            instance.set_password(password)
+        instance.save()
+        return instance
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    """Serializer for user profile (read-only for normal users)"""
+    class Meta:
+        model = User
+        fields = [
+            'id',
+            'username',
+            'email',
+            'role',
+            'department',
+            'first_name',
+            'last_name',
+            'date_joined',
+        ]
+        read_only_fields = ['id', 'username', 'email', 'role', 'date_joined']
+
+
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Book
+        fields = [
+            'id',
+            'unique_id',
+            'title',
+            'author',
+            'category',
+            'isbn',
+            'publication_date',
+            'total_copies',
+            'available_copies',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['available_copies', 'created_at', 'updated_at']
+
+
+class BookIssueSerializer(serializers.ModelSerializer):
+    book_title = serializers.CharField(source='book.title', read_only=True)
+    book_author = serializers.CharField(source='book.author', read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = BookIssue
+        fields = [
+            'id',
+            'book',
+            'book_title',
+            'book_author',
+            'user',
+            'username',
+            'issue_date',
+            'return_date',
+            'status',
+            'notes',
+        ]
+        read_only_fields = ['id', 'issue_date', 'book_title', 'book_author', 'username']
+
+    def validate(self, attrs):
+        book = attrs.get('book')
+        user = self.context['request'].user
+
+        # Check if book is available
+        if book and book.available_copies <= 0:
+            raise serializers.ValidationError({'book': 'This book currently has no available copies.'})
+
+        # Check if user already has this book issued
+        existing_issue = BookIssue.objects.filter(
+            book=book,
+            user=user,
+            status='issued'
+        ).exists()
+
+        if existing_issue:
+            raise serializers.ValidationError({'book': 'You already have this book issued.'})
+
+        return attrs
+
+    def create(self, validated_data):
+        book = validated_data['book']
+        user = self.context['request'].user
+
+        # Decrease available copies
+        book.available_copies = max(book.available_copies - 1, 0)
+        book.save(update_fields=['available_copies'])
+
+        validated_data.pop('user', None)
+
+        # Create issue record
+        return BookIssue.objects.create(user=user, **validated_data)
+
+
+class BookReturnSerializer(serializers.Serializer):
+    """Serializer for returning books"""
+    issue_id = serializers.IntegerField()
+
+    def validate_issue_id(self, value):
+        try:
+            issue = BookIssue.objects.get(
+                id=value,
+                user=self.context['request'].user,
+                status='issued'
+            )
+            return issue
+        except BookIssue.DoesNotExist:
+            raise serializers.ValidationError("Invalid issue ID or book not currently issued to you.")
+
+    def save(self):
+        issue_obj = self.validated_data['issue_id']
+        issue_obj.return_date = timezone.now()
+        issue_obj.status = 'returned'
+        issue_obj.save()
+
+        # Increase available copies
+        book = issue_obj.book
+        book.available_copies += 1
+        book.save(update_fields=['available_copies'])
+
+        return issue_obj
+
+
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField()
+
+    def validate(self, attrs):
+        username = attrs.get('username')
+        password = attrs.get('password')
+
+        if username and password:
+            user = authenticate(username=username, password=password)
+            if not user:
+                raise serializers.ValidationError('Invalid credentials.')
+            if not user.is_active:
+                raise serializers.ValidationError('User account is disabled.')
+            attrs['user'] = user
+            return attrs
+        else:
+            raise serializers.ValidationError('Must include username and password.')
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+    password_confirm = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            'username',
+            'email',
+            'password',
+            'password_confirm',
+            'first_name',
+            'last_name',
+            'department',
+        ]
+
+    def validate(self, attrs):
+        if attrs['password'] != attrs['password_confirm']:
+            raise serializers.ValidationError("Passwords don't match.")
+        return attrs
+
+    def create(self, validated_data):
+        validated_data.pop('password_confirm')
+        password = validated_data.pop('password')
+        user = User(**validated_data)
+        user.set_password(password)
+        user.save()
+        return user
+
+
+class AdminReportSerializer(serializers.Serializer):
+    """Serializer for admin reports"""
+    total_books = serializers.IntegerField()
+    total_users = serializers.IntegerField()
+    total_issues = serializers.IntegerField()
+    active_issues = serializers.IntegerField()
+    total_available_copies = serializers.IntegerField()
+    most_issued_books = BookSerializer(many=True)
+    recent_issues = BookIssueSerializer(many=True)

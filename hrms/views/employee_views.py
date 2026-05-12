@@ -9,7 +9,7 @@ import requests
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db.models import Sum
-from hrms.models import Role, MobileOTP, EmailOTP, Employee
+from hrms.models import Role, MobileOTP, EmailOTP, Employee, User, Book, BookIssue
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from hrms.serializers.emp_serializers import *
 from rest_framework_simplejwt.tokens import RefreshToken 
@@ -249,7 +249,7 @@ class ForgetPasswordView(APIView):
     def post(self, request):
         email_id = request.data.get("email_id")  
         mobile_number = request.data.get("mobile_number")
-        print(email_id, mobile_number)
+        # print(email_id, mobile_number)
 
         if not email_id and not mobile_number:
             return Response({"error": "Either email_id or mobile_number is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -699,8 +699,8 @@ class AttendanceApiView(APIView):
     def post(self, request, *args, **kwargs):
         try:
             user = request.user
-            print(user)
-            print(user.id)
+            # print(user)
+            # print(user.id)
             # if user.role.name != "EMPLOYEE":
             # FULL_DAY_HOURS = timedelta(hours=8, minutes=45)
             serializer = AttendanceSerializer(data=request.data)
@@ -1003,7 +1003,7 @@ class LeaveRequestView(APIView):
                 return Response({"error": "Invalid date range"}, status=status.HTTP_400_BAD_REQUEST)
         
             total_days = (to_date - from_date).days + 1
-            print(leave_type, total_days)
+            # print(leave_type, total_days)
 
         
             if half_day:
@@ -1410,27 +1410,84 @@ from datetime import date
 import pywhatkit
 
 
-class whatsappAPIView(APIView):
+# class whatsappAPIView(APIView):
+
+#     def post(self, request):
+
+#         today = date.today()
+
+#         employees = Employee.objects.filter(
+#             date_of_birth__month=today.month,
+#             date_of_birth__day=today.day
+#         )
+
+#         for emp in employees:
+
+#             # send_whatsapp_message()
+#             pywhatkit.sendwhatmsg_instantly(
+#                 emp.phone,
+#                 f"Happy Birthday {emp.name} 🎉"
+#             )
+
+#             self.stdout.write(
+#                 self.style.SUCCESS(
+#                     f"Sent to {emp.name}"
+#                 )
+#             )
+
+
+class WhatsAppAPIView(APIView):
 
     def post(self, request):
 
         today = date.today()
 
         employees = Employee.objects.filter(
-            dob__month=today.month,
-            dob__day=today.day
+            date_of_birth__month=today.month,
+            date_of_birth__day=today.day
         )
+
+        # print(employees)
+        # print("TODAY:", today)
+
+        # print(Employee.objects.all().values("full_name", "date_of_birth"))
+
+        sent_employees = []
+        failed_employees = []
 
         for emp in employees:
 
-            # send_whatsapp_message()
-            pywhatkit.sendwhatmsg_instantly(
-                emp.phone,
-                f"Happy Birthday {emp.name} 🎉"
-            )
+            try:
+                phone_no=str(emp.mobile_number).strip()
+                if not phone_no.startswith("+"):
+                    phone = "+91" + phone_no
 
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"Sent to {emp.name}"
+                # IMPORTANT:
+                # phone format should be like +919876543210
+
+                pywhatkit.sendwhatmsg_instantly(
+                    phone_no=phone,
+                    message=f"Happy Birthday {emp.full_name} 🎉",
+                    wait_time=15,
+                    tab_close=True,
+                    close_time=3
                 )
-            )
+
+                sent_employees.append(emp.full_name)
+
+            except Exception as e:
+
+                failed_employees.append({
+                    "employee": emp.full_name,
+                    "error": str(e)
+                })
+
+        return Response(
+            {
+                "status": "completed",
+                "total_birthdays": employees.count(),
+                "sent": sent_employees,
+                "failed": failed_employees
+            },
+            status=status.HTTP_200_OK
+        )

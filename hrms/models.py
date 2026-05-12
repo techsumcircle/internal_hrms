@@ -34,6 +34,10 @@ class User(AbstractUser):
     def __str__(self):
         return self.username
     
+    # @property
+    # def is_normal_user(self):
+    #     return self.role == 'user'
+    
 class EmailOTP(models.Model):
     email = models.EmailField()
     otp = models.CharField(max_length=6)
@@ -258,3 +262,99 @@ class Holiday(models.Model):
     
 
 
+## pageflow
+
+
+# class User(AbstractUser):
+#     """Custom User model with role-based access"""
+#     ROLE_CHOICES = [
+#         ('admin', 'Admin'),
+#         ('user', 'User'),
+#     ]
+
+#     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
+#     department = models.CharField(max_length=100, blank=True, null=True)
+
+#     class Meta:
+#         ordering = ['username']
+
+#     def __str__(self):
+#         return f"{self.username} ({self.get_role_display()})"
+
+#     @property
+#     def is_admin(self):
+#         return self.role == 'admin'
+
+#     @property
+#     def is_normal_user(self):
+#         return self.role == 'user'
+
+
+class Book(models.Model):
+    """Model to store book information"""
+    CATEGORY_CHOICES = [
+        ('fiction', 'Fiction'),
+        ('non-fiction', 'Non-Fiction'),
+        ('reference', 'Reference'),
+        ('biography', 'Biography'),
+        ('technology', 'Technology'),
+        ('business', 'Business'),
+        ('self-help', 'Self-Help'),
+        ('other', 'Other'),
+    ]
+
+    unique_id = models.CharField(max_length=50, unique=True)
+    title = models.CharField(max_length=200)
+    author = models.CharField(max_length=200)
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
+    isbn = models.CharField(max_length=20, blank=True, null=True)
+    publication_date = models.DateField(blank=True, null=True)
+    total_copies = models.IntegerField(default=1)
+    available_copies = models.IntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.title} by {self.author}"
+
+    def save(self, *args, **kwargs):
+        if self.available_copies > self.total_copies:
+            self.available_copies = self.total_copies
+        super().save(*args, **kwargs)
+
+
+class BookIssue(models.Model):
+    """Model to track book issue and return"""
+    STATUS_CHOICES = [
+        ('issued', 'Issued'),
+        ('returned', 'Returned'),
+    ]
+
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name='issues')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='book_issues', null=True)
+    issue_date = models.DateTimeField(auto_now_add=True)
+    return_date = models.DateTimeField(blank=True, null=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='issued')
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-issue_date']
+        # unique_together = ['book', 'user', 'status']  # Prevent multiple active issues per book per user
+
+    def __str__(self):
+        return f"{self.book.title} - {self.user.username} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if self.return_date and self.status == 'issued':
+            self.status = 'returned'
+        elif not self.return_date and self.status == 'returned':
+            self.return_date = timezone.now()
+        super().save(*args, **kwargs)
+
+    @property
+    def is_active(self):
+        """Check if book is currently issued"""
+        return self.status == 'issued'
