@@ -3,6 +3,10 @@ from rest_framework.routers import DefaultRouter
 from hrms.views import *
 
 urlpatterns = [
+    #office location management
+    path('office-location/', OfficeLocationAPIView.as_view(), name='office_location'),
+    path('office-location/<int:pk>/', OfficeLocationAPIView.as_view(), name='office_location_detail'),
+    
     # Authentication and User Management
     path('roles/', RoleAPIView.as_view(), name='roles'),
     path('roles/<int:pk>/', RoleAPIView.as_view(), name='roles_detail'),
@@ -13,6 +17,8 @@ urlpatterns = [
     path('user/', UserAPIView.as_view(), name='user'),
 
     # Attendance Management
+    path('attendance/punch-in/', AttendancePunchInAPIView.as_view(), name='attendance_punch_in'),
+    path('attendance/punch-out/', AttendancePunchOutAPIView.as_view(), name='attendance_punch_out'),
     path('attendance/', AttendanceApiView.as_view(), name='attendance'),
     path('attendance/<int:pk>/', AttendanceApiView.as_view(), name='attendance_detail'),
 

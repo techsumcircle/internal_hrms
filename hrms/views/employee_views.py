@@ -1,6 +1,7 @@
-from datetime import timedelta, datetime, time
+from datetime import timedelta, datetime
 from django.utils import timezone
 from django.http import HttpResponse
+import math
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -19,8 +20,13 @@ from django.shortcuts import get_object_or_404
 from django.contrib.postgres.search import SearchVector
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction
+import pywhatkit
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
+from hrms.models import ( Role, MobileOTP, EmailOTP, Employee, User,
+    Attendance, OfficeLocation, WorkFromHomeRequest, AttendanceSession
+)
+from hrms.serializers.officeLocation_serializer import OfficeLocationSerializer
 
 
 class RoleAPIView(APIView):
@@ -82,7 +88,6 @@ class RoleAPIView(APIView):
         except Role.DoesNotExist:
             return Response({'error': 'Role does not Exists'}, status=status.HTTP_404_NOT_FOUND)
 
-
 class RegisterAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -102,31 +107,36 @@ class RegisterAPIView(APIView):
                     return Response({'error': 'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
                 
                 # return Response({'error': serializer.data}, status=status.HTTP_400_BAD_REQUEST)
-                user = serializer.save()               
-                if user.role and user.role.name == 'EMPLOYEE': 
-                    employee_num = Employee.objects.order_by('-id').first()        
+                user = serializer.save()
+
+                if user.role and user.role.name.strip().upper() == 'EMPLOYEE':
+
+                    employee_num = Employee.objects.order_by('-id').first()
+
                     if employee_num and employee_num.employee_id:
                         try:
-                            last_transaction = int(employee_num.employee_id.replace('EMP', ''))
+                            last_transaction = int(
+                                employee_num.employee_id.replace('EMP', '')
+                            )
                             employee_id = f"EMP{last_transaction + 1:03d}"
-                        except:
+                        except (ValueError, AttributeError):
                             employee_id = "EMP001"
                     else:
                         employee_id = "EMP001"
 
-                    # available_balance = 
-                    # print(user.id)
-                    Employee.objects.create(
+                    employee = Employee.objects.create(
                         user=user,
                         employee_id=employee_id,
-                        full_name=user.get_full_name()or user.username,
+                        full_name=user.get_full_name() or user.username,
                         email=user.email,
                         mobile_number=user.mobile_number,
-                        )
-                    
+                        department=getattr(user, 'registration_department', ''),
+                        position=getattr(user, 'registration_position', ''),
+                    )
+
                     EmployeeLeaveBalance.objects.create(
-                        employee=employee_num,
-                        )
+                        employee=employee
+                    )
                 return Response(
                     {
                         "message": "User registered successfully",
@@ -137,14 +147,13 @@ class RegisterAPIView(APIView):
                         "last_name": user.last_name,
                         "mobile_number": user.mobile_number,
                         "email": user.email,
-                        "password": user.raw_password,
+                        "password": user.password,
                         "role": user.role.name if user.role else None
                     }, status=status.HTTP_201_CREATED
                 )
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
@@ -174,7 +183,6 @@ class LoginAPIView(APIView):
             )
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class UserAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -236,7 +244,6 @@ class LoginWithOTPApiView(APIView):
                 return Response({"error": "Failed to send OTP.", "status": sms_status}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class ForgetPasswordView(APIView):
     """
@@ -362,41 +369,6 @@ class ForgetPasswordView(APIView):
                 return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
             except User.DoesNotExist:
                 return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
-
-# class ForgetPasswordAPIView(APIView):
-#     permission_classes = []
-
-#     def post(self, request):
-#         try:
-#             serializer = ForgetPasswordSerializer(data=request.data)
-#             serializer.is_valid()
-
-    
-#             email = serializer.validated_data['email']
-#             mobile_number = serializer.validated_data['mobile_number']
-#             new_password = serializer.validated_data['new_password']
-#             confirm_password = serializer.validated_data['confirm_password']
-
-#             if new_password != confirm_password:
-#                 raise serializers.ValidationError("Passwords do not match", code="password_mismatch")
-#             # return serializer.validated_data
-    
-#             mobile_number = User.objects.get(mobile_number=mobile_number)
-
-#             try:
-#                 user = User.objects.get(email=email)
-#             except User.DoesNotExist:
-#                 return Response(
-#                     {"error": "Email not found"},
-#                     status=status.HTTP_404_NOT_FOUND
-#                 )
-    
-#             user.set_password(new_password)
-#             user.save()
-    
-#             return Response({"message": "Password reset successfully"}, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 class LogoutApiView(APIView):
     permission_classes = [IsAuthenticated]
@@ -434,15 +406,7 @@ class EmployeeApiView(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    # def patch(self, request):
-    #     serializer = EmployeeSerializer(data=request.data)
-    #     if serializer.is_valid():
-    #         serializer.save()
-    #         return Response(serializer.data, status=status.HTTP_201_CREATED)
-    #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-
     def put(self, request):
         try:
             user = request.user
@@ -467,7 +431,6 @@ class EmployeeApiView(APIView):
             return Response({"error": "Only HR and Employee can submit employee details"}, status=status.HTTP_403_FORBIDDEN)
         except Employee.DoesNotExist:
             return Response({"error": "Employee profile not found"}, status=status.HTTP_400_BAD_REQUEST)
-
 
 class EmployeeEmergencyContactView(APIView):
     # permission_classes = [IsAuthenticated]
@@ -503,7 +466,6 @@ class EmployeeEmergencyContactView(APIView):
             return Response({"error": "Only HR and Employee can submit employee details"}, status=status.HTTP_403_FORBIDDEN)
         except Employee.DoesNotExist:
             return Response({"error": "Employee profile not found"}, status=status.HTTP_400_BAD_REQUEST)
-
 
 class EmployeeAddressIdentityRequestView(APIView):
     permission_classes = [IsAuthenticated]
@@ -541,7 +503,6 @@ class EmployeeAddressIdentityRequestView(APIView):
             return Response({"error": "Only HR and Employee can submit employee details"}, status=status.HTTP_403_FORBIDDEN)
         except Employee.DoesNotExist:
             return Response({"error": "Employee profile not found"}, status=status.HTTP_400_BAD_REQUEST)
-
 
 class EmployeeDetailApiView(APIView):
     permission_classes = [IsAuthenticated]
@@ -704,18 +665,150 @@ class EmployeeDetailApiView(APIView):
     #         self.send_notification(checkbox.employee.user,"Sorry your address and identity details have been REJECTED by HR. Kindly resubmit with correct details.")
     #     return Response({"message": f"Details {approval_status} successfully"},status=status.HTTP_200_OK)
 
-
-
 class AttendanceApiView(APIView):
     # permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
-            attendance_records = Attendance.objects.all()
-            serializer = AttendanceSerializer(attendance_records, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            employee_id = request.query_params.get("employee_id")
+
+            attendance_records = Attendance.objects.prefetch_related(
+                'sessions'
+            ).all()
+
+            if employee_id:
+                attendance_records = attendance_records.filter(
+                    employee__employee_id=employee_id
+                )
+
+            serializer = AttendanceSerializer(
+                attendance_records,
+                many=True
+            )
+
+            response_data = []
+
+            for attendance, serialized_record in zip(
+                attendance_records,
+                serializer.data
+            ):
+                sessions = list(attendance.sessions.all())
+
+                total_work_duration = timedelta(0)
+                time_logs = []
+
+                first_check_in = None
+                last_check_out = None
+
+                now = timezone.localtime(timezone.now())
+
+                for session in sessions:
+                    check_in = timezone.localtime(
+                        session.check_in_datetime
+                    )
+
+                    if first_check_in is None:
+                        first_check_in = check_in
+
+                    check_out = None
+
+                    if session.check_out_datetime:
+                        check_out = timezone.localtime(
+                            session.check_out_datetime
+                        )
+
+                        session_duration = (
+                            session.check_out_datetime -
+                            session.check_in_datetime
+                        )
+
+                        total_work_duration += session_duration
+                        last_check_out = check_out
+
+                    else:
+                        # Include currently active session in live hours
+                        session_duration = (
+                            timezone.now() -
+                            session.check_in_datetime
+                        )
+
+                        total_work_duration += session_duration
+
+                        check_out = None
+
+                    time_logs.append({
+                        "session_id": session.id,
+                        "clock_in": check_in.strftime(
+                            "%I:%M:%S %p"
+                        ),
+                        "clock_out": (
+                            check_out.strftime("%I:%M:%S %p")
+                            if check_out else "OUT missing"
+                        ),
+                        "session_duration": str(session_duration),
+                        "session_status": (
+                            "Completed"
+                            if session.check_out_datetime
+                            else "Open"
+                        )
+                    })
+
+                if first_check_in:
+                    gross_end = (
+                        now if any(
+                            not s.check_out_datetime for s in sessions
+                        )
+                        else last_check_out
+                    )
+
+                    gross_duration = (
+                        gross_end - first_check_in
+                    ) if gross_end else timedelta(0)
+
+                else:
+                    gross_duration = timedelta(0)
+
+                break_duration = (
+                    gross_duration - total_work_duration
+                )
+
+                if break_duration < timedelta(0):
+                    break_duration = timedelta(0)
+
+                mandatory_duration = timedelta(
+                    hours=8,
+                    minutes=30
+                )
+
+                record = dict(serialized_record)
+
+                record.update({
+                    "gross_hours": str(gross_duration),
+                    "effective_hours": str(total_work_duration),
+                    "break_duration": str(break_duration),
+                    "mandatory_working_hours": "08:30:00",
+                    "completed_mandatory_hours": (
+                        total_work_duration >= mandatory_duration
+                    ),
+                    "time_logs": time_logs
+                })
+
+                response_data.append(record)
+
+            return Response(
+                response_data,
+                status=status.HTTP_200_OK
+            )
+
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {
+                    "message": str(e),
+                    "status": False
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
         
     def post(self, request, *args, **kwargs):
         try:
@@ -814,78 +907,6 @@ class AttendanceApiView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
                 return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-# class WorkFromHomeRequestView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def get(self, request):
-#         try:
-#             session = WorkFromHomeRequest.objects.all()
-#             serializer = WorkFromHomeRequestSerializer(session, many = True)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def post(self, request, *args, **kwargs):
-#         try:
-#             user = request.user
-#             serializer = WorkFromHomeRequestSerializer(data=request.data)
-#             serializer.is_valid(raise_exception=True)
-
-#             employee = Employee.objects.get(user=request.user)
-#             print(employee)
-
-#             from_date = serializer.validated_data.get('from_date')
-#             to_date = serializer.validated_data.get('to_date')
-#             reason = serializer.validated_data.get('reason')
-
-#             if from_date is None or to_date is None:
-#                 return Response(
-#                     {"error": "from_date and to_date are required"},
-#                     status=status.HTTP_400_BAD_REQUEST
-#                 )
-
-#             if to_date < from_date:
-#                 return Response(
-#                     {"error": "to_date cannot be before from_date"},
-#                     status=status.HTTP_400_BAD_REQUEST
-#                 )
-
-#             total_days = (to_date - from_date).days + 1
-
-
-#             # session = WorkFromHomeRequest.objects.filter(employee=employee)
-            
-#             WFH_Request = WorkFromHomeRequest.objects.create(
-#                 employee=employee,
-#                 from_date=from_date,
-#                 to_date=to_date,
-#                 total_days=total_days,
-#                 reason=reason,
-#                 status='pending'
-#             )
-#             serializer = WorkFromHomeRequestSerializer(WFH_Request)
-#             return Response(serializer.data, status=status.HTTP_201_CREATED)
-#         except:
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-# class WorkFromHomeApprovalView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def get(self, request):
-#         try:
-#             session = WorkFromHomeApproval.objects.all()
-#             serializer = WorkFromHomeApprovalSerializer(session, many = True)
-#             return Response(serializer.errors, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({'errors': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-#     def post(self, request):
-#         serializer = WorkFromHomeApprovalSerializer(data=request.data)
-#         if serializer.is_valid():
-#             serializer.save()
-#             return Response(serializer.data, status=status.HTTP_201_CREATED)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class WorkFromHomeRequestView(APIView):
     permission_classes = [IsAuthenticated]
@@ -996,7 +1017,6 @@ class WorkFromHomeApprovalView(APIView):
                 )
 
         return Response(WorkFromHomeApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
-
 
 class LeaveRequestView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1150,7 +1170,6 @@ class HRLeaveApproveAPIView(APIView):
 
         return Response({"message": "Leave approved & balance deducted"}, status=status.HTTP_200_OK)
 
-
 class LeaveRejectAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1164,7 +1183,6 @@ class LeaveRejectAPIView(APIView):
         leave.save()
 
         return Response({"message": "Leave rejected"}, status=status.HTTP_200_OK)
-
 
 class LeaveCancelAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1202,7 +1220,679 @@ class LeaveCancelAPIView(APIView):
         leave.save()
 
         return Response({"message": "Leave cancelled & balance reverted"}, status=status.HTTP_200_OK)
-    
+
+class OfficeLocationAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            office = OfficeLocation.objects.filter(is_active=True).first()
+
+            if not office:
+                return Response({
+                    'message': 'Office location not configured.',
+                    'status': False,
+                    'data': None
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            serializer = OfficeLocationSerializer(office)
+
+            return Response({
+                'message': 'Office location fetched successfully.',
+                'status': True,
+                'data': serializer.data
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                'message': str(e),
+                'status': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        try:
+            if not request.user.role or request.user.role.name != 'ADMIN':
+                return Response({
+                    'message': 'Only Admin can create office location.',
+                    'status': False
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            if OfficeLocation.objects.exists():
+                return Response({
+                    'message': 'Office location already exists. Use PUT to update it.',
+                    'status': False
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            serializer = OfficeLocationSerializer(data=request.data)
+
+            if serializer.is_valid():
+                serializer.save()
+                return Response({
+                    'message': 'Office location created successfully.',
+                    'status': True,
+                    'data': serializer.data
+                }, status=status.HTTP_201_CREATED)
+
+            return Response({
+                'message': 'Validation failed.',
+                'status': False,
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({
+                'message': str(e),
+                'status': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def put(self, request, pk):
+        try:
+            if not request.user.role or request.user.role.name != 'ADMIN':
+                return Response({
+                    'message': 'Only Admin can update office location.',
+                    'status': False
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            office = OfficeLocation.objects.filter(pk=pk).first()
+
+            if not office:
+                return Response({
+                    'message': 'Office location not found.',
+                    'status': False
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            serializer = OfficeLocationSerializer(
+                office, data=request.data, partial=True
+            )
+
+            if serializer.is_valid():
+                serializer.save()
+                return Response({
+                    'message': 'Office location updated successfully.',
+                    'status': True,
+                    'data': serializer.data
+                }, status=status.HTTP_200_OK)
+
+            return Response({
+                'message': 'Validation failed.',
+                'status': False,
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({
+                'message': str(e),
+                'status': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)    
+
+class AttendanceLocationMixin:
+
+    def validate_attendance_location(self, attendance, request):
+        latitude = request.data.get("latitude")
+        longitude = request.data.get("longitude")
+
+        if latitude is None or longitude is None:
+            return None, None, None, {
+                "message": "Latitude and longitude are required.",
+                "status": False
+            }
+
+        try:
+            latitude = round(float(latitude), 6)
+            longitude = round(float(longitude), 6)
+
+            if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+                raise ValueError
+
+        except (ValueError, TypeError):
+            return None, None, None, {
+                "message": "Invalid latitude or longitude.",
+                "status": False
+            }
+
+        distance = None
+
+        if attendance.work_mode == "OFFICE":
+            office = OfficeLocation.objects.filter(
+                is_active=True
+            ).first()
+
+            if not office:
+                return None, None, None, {
+                    "message": "Active office location is not configured.",
+                    "status": False
+                }
+
+            distance = AttendancePunchInAPIView().get_distance(
+                latitude,
+                longitude,
+                office.latitude,
+                office.longitude
+            )
+
+            if distance > office.radius_meters:
+                return None, None, distance, {
+                    "message": "You must be within the office location to perform this attendance action.",
+                    "status": False,
+                    "distance_meters": round(distance, 2),
+                    "allowed_radius_meters": office.radius_meters
+                }
+
+        return latitude, longitude, distance, None
+
+class AttendancePunchInAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_distance(self, lat1, lon1, lat2, lon2):
+        earth_radius = 6371000
+
+        lat1 = math.radians(float(lat1))
+        lon1 = math.radians(float(lon1))
+        lat2 = math.radians(float(lat2))
+        lon2 = math.radians(float(lon2))
+
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(lat1) * math.cos(lat2)
+            * math.sin(dlon / 2) ** 2
+        )
+
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        return earth_radius * c
+
+    def post(self, request):
+        try:
+            user = request.user
+            employee = Employee.objects.filter(user=user).first()
+
+            if not employee:
+                return Response(
+                    {
+                        "message": "Employee profile not found.",
+                        "status": False
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            work_mode = request.data.get("work_mode", "").upper()
+
+            if work_mode not in ["OFFICE", "WFH"]:
+                return Response(
+                    {
+                        "message": "work_mode must be either OFFICE or WFH.",
+                        "status": False
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            local_now = timezone.localtime(timezone.now())
+            today = local_now.date()
+
+            latitude = request.data.get("latitude")
+            longitude = request.data.get("longitude")
+
+            if latitude is None or longitude is None:
+                return Response(
+                    {
+                        "message": "Latitude and longitude are required.",
+                        "status": False
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            try:
+                latitude = round(float(latitude), 6)
+                longitude = round(float(longitude), 6)
+
+                if not (
+                    -90 <= latitude <= 90
+                    and -180 <= longitude <= 180
+                ):
+                    raise ValueError
+
+            except (ValueError, TypeError):
+                return Response(
+                    {
+                        "message": "Invalid latitude or longitude.",
+                        "status": False
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            distance = None
+
+            # WFH approval validation
+            if work_mode == "WFH":
+
+                approved_wfh = WorkFromHomeRequest.objects.filter(
+                    employee=employee,
+                    from_date__lte=today,
+                    to_date__gte=today,
+                    status="APPROVED"
+                ).exists()
+
+                if not approved_wfh:
+                    return Response(
+                        {
+                            "message": "You do not have an approved WFH request for today.",
+                            "status": False
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
+            # Office location validation
+            elif work_mode == "OFFICE":
+
+                office = OfficeLocation.objects.filter(
+                    is_active=True
+                ).first()
+
+                if not office:
+                    return Response(
+                        {
+                            "message": "Active office location is not configured.",
+                            "status": False
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                distance = self.get_distance(
+                    latitude,
+                    longitude,
+                    office.latitude,
+                    office.longitude
+                )
+
+                if distance > office.radius_meters:
+                    return Response(
+                        {
+                            "message": "You are outside the allowed office location.",
+                            "status": False,
+                            "distance_meters": round(distance, 2),
+                            "allowed_radius_meters": office.radius_meters
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
+            with transaction.atomic():
+
+                attendance = Attendance.objects.select_for_update().filter(
+                    employee=employee,
+                    date=today
+                ).first()
+
+                # Create today's attendance if it does not exist
+                if not attendance:
+                    attendance = Attendance.objects.create(
+                        employee=employee,
+                        user=user,
+                        date=today,
+                        work_mode=work_mode,
+                        status=(
+                            "Present"
+                            if work_mode == "OFFICE"
+                            else "Work From Home"
+                        )
+                    )
+
+                else:
+                    # Do not allow changing work mode during the day
+                    if (
+                        attendance.work_mode
+                        and attendance.work_mode != work_mode
+                    ):
+                        return Response(
+                            {
+                                "message": "You cannot change your work mode during the same attendance day.",
+                                "status": False
+                            },
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                    if not attendance.work_mode:
+                        attendance.work_mode = work_mode
+
+                    # Preserve old attendance data as a session
+                    # for employees who already punched in using
+                    # the previous version of the API.
+                    if not attendance.sessions.exists() and attendance.check_in_datetime:
+
+                        AttendanceSession.objects.create(
+                            attendance=attendance,
+                            check_in_datetime=attendance.check_in_datetime,
+                            check_out_datetime=attendance.check_out_datetime,
+                            check_in_latitude=attendance.check_in_latitude,
+                            check_in_longitude=attendance.check_in_longitude,
+                            check_out_latitude=attendance.check_out_latitude,
+                            check_out_longitude=attendance.check_out_longitude
+                        )
+
+                # Check whether an earlier session is still open
+                open_session = AttendanceSession.objects.filter(
+                    attendance=attendance,
+                    check_out_datetime__isnull=True
+                ).first()
+
+                if open_session:
+                    return Response(
+                        {
+                            "message": "You are already punched in. Please punch out before punching in again.",
+                            "status": False
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Create a new work session
+                session = AttendanceSession.objects.create(
+                    attendance=attendance,
+                    check_in_datetime=local_now,
+                    check_in_latitude=latitude,
+                    check_in_longitude=longitude
+                )
+
+                # Keep the original first punch-in in Attendance
+                if not attendance.check_in_datetime:
+                    attendance.check_in_datetime = local_now
+                    attendance.check_in_time = local_now.time().replace(
+                        tzinfo=None
+                    )
+                    attendance.check_in_latitude = latitude
+                    attendance.check_in_longitude = longitude
+
+                attendance.user = user
+                attendance.work_mode = work_mode
+
+                # Attendance remains open until End Day API
+                attendance.check_out_datetime = None
+                attendance.check_out_time = None
+                attendance.check_out_latitude = None
+                attendance.check_out_longitude = None
+
+                # Final calculations will happen at End Day
+                # attendance.total_duration = None
+                # attendance.break_duration = None
+                # attendance.net_work_duration = None
+
+                if work_mode == "OFFICE":
+                    attendance.status = "Present"
+                elif attendance.status == "Absent":
+                    attendance.status = "Work From Home"
+
+                attendance.save()
+
+            return Response(
+                {
+                    "message": "Punch in successful.",
+                    "status": True,
+                    "data": {
+                        "attendance_id": attendance.id,
+                        "session_id": session.id,
+                        "date": str(today),
+                        "check_in_time": local_now.strftime("%H:%M:%S"),
+                        "work_mode": work_mode,
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "distance_meters": (
+                            round(distance, 2)
+                            if distance is not None
+                            else None
+                        )
+                    }
+                },
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            return Response(
+                {
+                    "message": "Something went wrong.",
+                    "status": False,
+                    "error": str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class AttendancePunchOutAPIView(AttendanceLocationMixin, APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            user = request.user
+            employee = Employee.objects.filter(user=user).first()
+
+            if not employee:
+                return Response(
+                    {
+                        "message": "Employee profile not found.",
+                        "status": False
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            local_now = timezone.localtime(timezone.now())
+            today = local_now.date()
+
+            with transaction.atomic():
+
+                attendance = Attendance.objects.select_for_update().filter(
+                    employee=employee,
+                    date=today
+                ).first()
+
+                if not attendance:
+                    return Response(
+                        {
+                            "message": "Attendance record not found. Please punch in first.",
+                            "status": False
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Find the currently active session
+                session = AttendanceSession.objects.select_for_update().filter(
+                    attendance=attendance,
+                    check_out_datetime__isnull=True
+                ).order_by('-check_in_datetime').first()
+
+                if not session:
+                    return Response(
+                        {
+                            "message": "You have not punched in or have already punched out.",
+                            "status": False
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Validate GPS using saved attendance work mode
+                latitude, longitude, distance, location_error = (
+                    self.validate_attendance_location(attendance, request)
+                )
+
+                if location_error:
+                    return Response(
+                        location_error,
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                if local_now < session.check_in_datetime:
+                    return Response(
+                        {
+                            "message": "Punch-out time cannot be earlier than punch-in time.",
+                            "status": status.HTTP_400_BAD_REQUEST
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Close current session
+                session.check_out_datetime = local_now
+                session.check_out_latitude = latitude
+                session.check_out_longitude = longitude
+                session.save()
+
+                # Get all completed sessions for this date
+                completed_sessions = list(
+                    AttendanceSession.objects.filter(
+                        attendance=attendance,
+                        check_out_datetime__isnull=False
+                    ).order_by('check_in_datetime')
+                )
+
+                total_work_duration = timedelta(0)
+                automatic_break_duration = timedelta(0)
+
+                previous_session = None
+
+                for current_session in completed_sessions:
+
+                    session_duration = (
+                        current_session.check_out_datetime -
+                        current_session.check_in_datetime
+                    )
+
+                    if session_duration < timedelta(0):
+                        raise ValueError(
+                            "Invalid attendance session duration."
+                        )
+
+                    total_work_duration += session_duration
+
+                    # Calculate gap between consecutive sessions
+                    if previous_session:
+                        gap_duration = (
+                            current_session.check_in_datetime -
+                            previous_session.check_out_datetime
+                        )
+
+                        if gap_duration < timedelta(0):
+                            raise ValueError(
+                                "Attendance sessions cannot overlap."
+                            )
+
+                        automatic_break_duration += gap_duration
+
+                    previous_session = current_session
+
+                # Calculate daily total duration
+                first_session = completed_sessions[0]
+                last_session = completed_sessions[-1]
+
+                daily_total_duration = (
+                    last_session.check_out_datetime -
+                    first_session.check_in_datetime
+                )
+
+                # Daily working time excludes gaps between sessions
+                daily_net_work_duration = total_work_duration
+
+                # All gaps are automatically counted as breaks
+                daily_break_duration = automatic_break_duration
+
+                # Update daily Attendance record after every punch-out
+                attendance.check_out_datetime = last_session.check_out_datetime
+                attendance.check_out_time = timezone.localtime(
+                    last_session.check_out_datetime
+                ).time()
+
+                attendance.check_out_latitude = (
+                    last_session.check_out_latitude
+                )
+                attendance.check_out_longitude = (
+                    last_session.check_out_longitude
+                )
+
+                attendance.total_duration = daily_total_duration
+                attendance.break_duration = daily_break_duration
+                attendance.net_work_duration = daily_net_work_duration
+
+                attendance.save(
+                    update_fields=[
+                        'check_out_datetime',
+                        'check_out_time',
+                        'check_out_latitude',
+                        'check_out_longitude',
+                        'total_duration',
+                        'break_duration',
+                        'net_work_duration'
+                    ]
+                )
+
+                mandatory_duration = timedelta(hours=8, minutes=30)
+
+                completed_mandatory_hours = (
+                    daily_net_work_duration >= mandatory_duration
+                )
+
+            return Response(
+                {
+                    "message": "Punch out successful. Daily attendance calculated successfully.",
+                    "status": True,
+                    "data": {
+                        "attendance_id": attendance.id,
+                        "session_id": session.id,
+                        "date": str(today),
+
+                        "session_check_in_time": timezone.localtime(
+                            session.check_in_datetime
+                        ).strftime("%H:%M:%S"),
+
+                        "session_check_out_time": local_now.strftime(
+                            "%H:%M:%S"
+                        ),
+
+                        "session_duration": str(
+                            session.check_out_datetime -
+                            session.check_in_datetime
+                        ),
+
+                        "total_sessions": len(completed_sessions),
+
+                        "daily_total_duration": str(
+                            daily_total_duration
+                        ),
+
+                        "daily_break_duration": str(
+                            daily_break_duration
+                        ),
+
+                        "daily_net_work_duration": str(
+                            daily_net_work_duration
+                        ),
+
+                        "mandatory_working_hours": "08:30:00",
+
+                        "completed_mandatory_hours": (
+                            completed_mandatory_hours
+                        ),
+
+                        "work_mode": attendance.work_mode,
+                        "latitude": latitude,
+                        "longitude": longitude,
+
+                        "distance_meters": (
+                            round(distance, 2)
+                            if distance is not None
+                            else None
+                        ),
+
+                        "attendance_closed": False
+                    }
+                },
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            return Response(
+                {
+                    "message": "Something went wrong.",
+                    "status": False,
+                    "error": str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class CompOffCreditAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1426,36 +2116,6 @@ class HrManagementAPIView(APIView):
     #         serializer.save()
     #         return Response(serializer.data, status=status.HTTP_200_OK)
     #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-from datetime import date
-# from hrms.utils.whatsapp import send_whatsapp_message
-import pywhatkit
-
-
-# class whatsappAPIView(APIView):
-
-#     def post(self, request):
-
-#         today = date.today()
-
-#         employees = Employee.objects.filter(
-#             date_of_birth__month=today.month,
-#             date_of_birth__day=today.day
-#         )
-
-#         for emp in employees:
-
-#             # send_whatsapp_message()
-#             pywhatkit.sendwhatmsg_instantly(
-#                 emp.phone,
-#                 f"Happy Birthday {emp.name} 🎉"
-#             )
-
-#             self.stdout.write(
-#                 self.style.SUCCESS(
-#                     f"Sent to {emp.name}"
-#                 )
-#             )
-
 
 class WhatsAppAPIView(APIView):
 
