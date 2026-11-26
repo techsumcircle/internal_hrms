@@ -128,9 +128,22 @@ class Attendance(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, null=True, blank=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     date = models.DateField()
+    check_in_datetime = models.DateTimeField(null=True, blank=True)
+    check_out_datetime = models.DateTimeField(null=True, blank=True)
     check_in_time = models.TimeField(timezone.now, null=True)
     check_out_time = models.TimeField(timezone.now, null=True)
     total_duration = models.DurationField(null=True, blank=True)
+    # GPS coordinates
+    check_in_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    check_in_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    check_out_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    check_out_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    # Work mode
+    WORK_MODE_CHOICES = [('OFFICE', 'Office'), ('WFH', 'Work From Home'),]
+    work_mode = models.CharField(max_length=10, choices=WORK_MODE_CHOICES, null=True, blank=True)
+    # Break and net working time
+    break_duration = models.DurationField(null=True, blank=True)
+    net_work_duration = models.DurationField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=ATTENDENCE_STATUS, default='Absent')
     class Meta:
         unique_together = ("employee", "date")
@@ -139,6 +152,50 @@ class Attendance(models.Model):
     def __str__(self):
         return f"{self.employee} - {self.date} - {self.user}"
 
+class OfficeLocation(models.Model):
+    name = models.CharField(max_length=100, default="Main Office")
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    radius_meters = models.PositiveIntegerField(default=100)
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+        
+
+class AttendanceSession(models.Model):
+    attendance = models.ForeignKey(Attendance, on_delete=models.CASCADE, related_name='sessions')
+    check_in_datetime = models.DateTimeField()
+    check_out_datetime = models.DateTimeField(null=True, blank=True)
+
+    check_in_latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True
+    )
+    check_in_longitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True
+    )
+    check_out_latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True
+    )
+    check_out_longitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['check_in_datetime']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['attendance'],
+                condition=models.Q(check_out_datetime__isnull=True),
+                name='unique_open_attendance_session'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.attendance.employee} - {self.check_in_datetime}"
 
 class WorkFromHomeRequest(models.Model):
     WFH_CHOICES = [
@@ -260,34 +317,6 @@ class Holiday(models.Model):
     def __str__(self):
         return f"{self.name} - {self.date} - {self.optional_holiday}"
     
-
-
-## pageflow
-
-
-# class User(AbstractUser):
-#     """Custom User model with role-based access"""
-#     ROLE_CHOICES = [
-#         ('admin', 'Admin'),
-#         ('user', 'User'),
-#     ]
-
-#     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
-#     department = models.CharField(max_length=100, blank=True, null=True)
-
-#     class Meta:
-#         ordering = ['username']
-
-#     def __str__(self):
-#         return f"{self.username} ({self.get_role_display()})"
-
-#     @property
-#     def is_admin(self):
-#         return self.role == 'admin'
-
-#     @property
-#     def is_normal_user(self):
-#         return self.role == 'user'
 
 
 class Book(models.Model):

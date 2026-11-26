@@ -12,28 +12,40 @@ class UserSerializer(serializers.ModelSerializer):
         fields = '__all__'
     
 
+
 class RegisterSerializer(serializers.ModelSerializer):
+    department = serializers.CharField(write_only=True, required=False)
+    position = serializers.CharField(write_only=True, required=False)
 
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'email', 'first_name', 'last_name', 'password', 'role', 'mobile_number'
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'password', 'role', 'department', 'position', 'mobile_number'
         ]
-        
+
     def create(self, validated_data):
-        password = get_random_string(12)
+        password = validated_data.pop('password')
+        department = validated_data.pop('department', '')
+        position = validated_data.pop('position', '')
+
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data.get('email'),
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', ''),
-            role=validated_data.get('role', ''),
+            role=validated_data.get('role'),
             mobile_number=validated_data.get('mobile_number', ''),
         )
-        user.set_password(password)  # hashes password
-        user.raw_password = password
-        user.save()    
+
+        user.set_password(password)
+        user.save()
+
+        user.registration_department = department
+        user.registration_position = position
+
         return user
+
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
@@ -126,18 +138,6 @@ class WorkFromHomeApprovalSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["approved_date"]
 
-# class LeaveRequestSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = LeaveApplication
-#         fields = '__all__'
-
-
-# class LeaveTypeSerializer(serializers.ModelSerializer):
-    # employee = serializers.StringRelatedField(read_only=True)
-    # class Meta:
-    #     model = LeaveType
-    #     fields = '__all__'
-        # read_only_fields = ["employee"]
 
 class EmployeeLeaveBalanceSerializer(serializers.ModelSerializer):
     # leave_type = LeaveTypeSerializer(read_only=True)
@@ -161,106 +161,6 @@ class LeaveApplicationSerializer(serializers.ModelSerializer):
             'hr_approved',
             'applied_date'
         )
-
-# class LeaveApprovalSerializer(serializers.ModelSerializer):
-#     leave_application = serializers.StringRelatedField(read_only=True)
-#     class Meta:
-#         model = LeaveApplication
-#         fields = [
-#             "id",
-#             "leave_application",
-#             "status",
-#             "manager_approved",
-#             "hr_approved"
-#         ]
-#         read_only_fields = ['manager_approved', 'hr_approved']
-
-
-# def deduct_leave_balance(sender, instance, created, **kwargs):
-
-#     # sirf APPROVAL pe chale
-#     if instance.status != 'APPROVED':
-#         return
-
-#     with transaction.atomic():
-
-#         balance = EmployeeLeaveBalance.objects.select_for_update().get(
-#             employee=instance.employee,
-#             leave_type=instance.leave_type
-#         )
-
-#         days = instance.total_days
-
-#         if instance.leave_type.leave_type == 'Casual':
-#             if balance.casual_leave_balance < days:
-#                 raise ValueError("Insufficient Casual Leave")
-
-#             balance.casual_leave_balance -= days
-
-#         elif instance.leave_type.leave_type == 'Sick':
-#             if balance.sick_leave_balance < days:
-#                 raise ValueError("Insufficient Sick Leave")
-
-#             balance.sick_leave_balance -= days
-
-#         elif instance.leave_type.leave_type == 'Optional':
-#             if balance.optional_leave_balance < days:
-#                 raise ValueError("Insufficient Optional Leave")
-
-#             balance.optional_leave_balance -= days
-
-#         # total available balance
-#         if balance.available_balance < days:
-#             raise ValueError("Insufficient Total Leave Balance")
-
-#         balance.available_balance -= days
-#         balance.save()
-
-    # def validate(self, attrs):
-    #     employee = self.context['request'].user
-    #     leave_type = attrs['leave_type']
-    #     days = attrs['total_days']
-    #     half_day = attrs.get('half_day', False)
-    #     from_date = attrs['from_date']
-    #     to_date = attrs['to_date']
-
-    #     # Date validation
-    #     if from_date > to_date:
-    #         raise serializers.ValidationError("Invalid date range")
-
-    #     # Half day rule
-    #     if half_day and not leave_type.half_day_allowed:
-    #         raise serializers.ValidationError("Half-day not allowed")
-
-    #     # Overlap check
-    #     if LeaveApplication.objects.filter(
-    #         employee=Employee.objects.get(user=employee),
-    #         from_date__lte=to_date,
-    #         to_date__gte=from_date,
-    #         status__in=['PENDING', 'APPROVED']
-    #     ).exists():
-    #         raise serializers.ValidationError("Leave already applied")
-
-    #     balance = EmployeeLeaveBalance.objects.get(employee=Employee.objects.get(user=employee))
-
-    #     # Balance validation
-    #     if leave_type.leave_type == 'Casual' and balance.casual_leave_balance < days:
-    #         raise serializers.ValidationError("Insufficient Casual Leave")
-
-    #     if leave_type.leave_type == 'Sick' and balance.sick_leave_balance < days:
-    #         raise serializers.ValidationError("Insufficient Sick Leave")
-
-    #     if leave_type.leave_type == 'Optional' and balance.optional_leave_balance < days:
-    #         raise serializers.ValidationError("Insufficient Optional Leave")
-
-    #     if leave_type.leave_type == 'CompOff' and balance.compoff_balance < days:
-    #         raise serializers.ValidationError("Insufficient Comp-Off balance")
-
-    #     if balance.available_balance < days:
-    #         raise serializers.ValidationError("Insufficient total balance")
-
-    #     return attrs
-
 
 class HolidaySerializer(serializers.ModelSerializer):
     class Meta:
@@ -452,37 +352,6 @@ class LoginSerializer(serializers.Serializer):
             return attrs
         else:
             raise serializers.ValidationError('Must include username and password.')
-
-
-class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
-    password_confirm = serializers.CharField(write_only=True)
-
-    class Meta:
-        model = User
-        fields = [
-            'username',
-            'email',
-            'password',
-            'password_confirm',
-            'first_name',
-            'last_name',
-            'department',
-        ]
-
-    def validate(self, attrs):
-        if attrs['password'] != attrs['password_confirm']:
-            raise serializers.ValidationError("Passwords don't match.")
-        return attrs
-
-    def create(self, validated_data):
-        validated_data.pop('password_confirm')
-        password = validated_data.pop('password')
-        user = User(**validated_data)
-        user.set_password(password)
-        user.save()
-        return user
-
 
 class AdminReportSerializer(serializers.Serializer):
     """Serializer for admin reports"""
