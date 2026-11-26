@@ -19,7 +19,8 @@ from django.shortcuts import get_object_or_404
 from django.contrib.postgres.search import SearchVector
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction
-
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
 
 
 class RoleAPIView(APIView):
@@ -399,10 +400,30 @@ class ForgetPasswordView(APIView):
     
 class LogoutApiView(APIView):
     permission_classes = [IsAuthenticated]
-    def post(self, request):
-        request.user.access_token.delete()
 
-        return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
+    def post(self, request):
+        try:
+            refresh_token = request.data.get("refresh")
+
+            if not refresh_token:
+                return Response(
+                    {"message": "Refresh token is required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+
+            return Response(
+                {"message": "Successfully logged out."},
+                status=status.HTTP_200_OK
+            )
+
+        except TokenError:
+            return Response(
+                {"message": "Invalid or expired refresh token."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
  
 class EmployeeApiView(APIView):
     permission_classes = [IsAuthenticated]
