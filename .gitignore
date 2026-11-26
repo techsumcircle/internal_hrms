@@ -17,6 +17,7 @@ media/employee_photo
 
 # Virtualenv
 venv/
+venv311/
 hrms_env/
 ENV/
 
