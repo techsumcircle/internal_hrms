@@ -1,0 +1,42 @@
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+venv311/
+env/
+.venv/
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Git
+.git/
+
+# IDE settings
+.idea/
+.vscode/
+
+# Node dependencies
+node_modules/
+
+# Python testing and build cache
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Database backups and dumps
+*.sql
+
+# Logs
+*.log
+
+# Collected static files
+staticfiles/

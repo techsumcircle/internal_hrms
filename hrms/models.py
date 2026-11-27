@@ -51,7 +51,6 @@ class MobileOTP(models.Model):
     otp = models.CharField(max_length=6)
     created_at = models.DateTimeField(default=timezone.now)
 
-
 class Employee(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee', null=True, blank=True)
     username = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee_username', null=True, blank=True)
@@ -116,7 +115,6 @@ class EmployeeDetailesCheckBox(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-
 class Attendance(models.Model):
     ATTENDENCE_STATUS = [
         ('Present', 'Present'),
@@ -163,7 +161,6 @@ class OfficeLocation(models.Model):
     def __str__(self):
         return self.name
         
-
 class AttendanceSession(models.Model):
     attendance = models.ForeignKey(Attendance, on_delete=models.CASCADE, related_name='sessions')
     check_in_datetime = models.DateTimeField()
@@ -237,9 +234,6 @@ class WorkFromHomeApproval(models.Model):
     def __str__(self):
         return f"{self.wfh_request} - {self.status_choices}"
 
-
-
-
 class EmployeeLeaveBalance(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
     casual_leave_balance = models.DecimalField(max_digits=5, decimal_places=2, default=11)
@@ -254,7 +248,6 @@ class EmployeeLeaveBalance(models.Model):
     def save(self, *args, **kwargs):
         self.available_balance = self.casual_leave_balance + self.sick_leave_balance + self.optional_leave_balance
         super().save(*args, **kwargs)
-
 
 class LeaveApplication(models.Model):
     STATUS_CHOICES = (
@@ -295,7 +288,6 @@ class LeaveApplication(models.Model):
     def __str__(self):
         return f"{self.employee} - {self.leave_type} ({self.status})"
     
-
 class Holiday(models.Model):
     HOLIDAY_TYPE = [
         ('NATIONAL', 'NATIONAL'),
@@ -317,8 +309,6 @@ class Holiday(models.Model):
     def __str__(self):
         return f"{self.name} - {self.date} - {self.optional_holiday}"
     
-
-
 class Book(models.Model):
     """Model to store book information"""
     CATEGORY_CHOICES = [
@@ -353,7 +343,6 @@ class Book(models.Model):
         if self.available_copies > self.total_copies:
             self.available_copies = self.total_copies
         super().save(*args, **kwargs)
-
 
 class BookIssue(models.Model):
     """Model to track book issue and return"""
