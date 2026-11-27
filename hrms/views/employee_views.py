@@ -666,20 +666,94 @@ class EmployeeDetailApiView(APIView):
     #     return Response({"message": f"Details {approval_status} successfully"},status=status.HTTP_200_OK)
 
 class AttendanceApiView(APIView):
-    # permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAuthenticated]
+    
     def get(self, request):
         try:
+            user = request.user
+            role = user.role.name.upper() if user.role else ""
+
             employee_id = request.query_params.get("employee_id")
+            date_value = request.query_params.get("date")
 
-            attendance_records = Attendance.objects.prefetch_related(
-                'sessions'
-            ).all()
+            if role in ["HR", "ADMIN"]:
+                attendance_records = Attendance.objects.all()
 
-            if employee_id:
-                attendance_records = attendance_records.filter(
-                    employee__employee_id=employee_id
+                if employee_id:
+                    employee = Employee.objects.filter(
+                        employee_id=employee_id
+                    ).first()
+
+                    if not employee:
+                        return Response(
+                            {
+                                "message": "Employee not found.",
+                                "status": False
+                            },
+                            status=status.HTTP_404_NOT_FOUND
+                        )
+
+                    attendance_records = attendance_records.filter(
+                        employee=employee
+                    )
+
+            elif role == "EMPLOYEE":
+                employee = Employee.objects.filter(
+                    user=user
+                ).first()
+
+                if not employee:
+                    return Response(
+                        {
+                            "message": "Employee profile not found.",
+                            "status": False
+                        },
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+
+                if employee_id and employee_id != employee.employee_id:
+                    return Response(
+                        {
+                            "message": "You are not allowed to view another employee's attendance.",
+                            "status": status.HTTP_403_FORBIDDEN
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
+                attendance_records = Attendance.objects.filter(
+                    employee=employee
                 )
+
+            else:
+                return Response(
+                    {
+                        "message": "You are not authorized to view attendance.",
+                        "status": False
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if date_value:
+                try:
+                    selected_date = datetime.strptime(
+                        date_value, "%Y-%m-%d"
+                    ).date()
+                except ValueError:
+                    return Response(
+                        {
+                            "message": "Invalid date format. Use YYYY-MM-DD.",
+                            "status": False
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                attendance_records = attendance_records.filter(
+                    date=selected_date
+                )
+
+            attendance_records = attendance_records.prefetch_related(
+                "sessions"
+            ).order_by("-date")
 
             serializer = AttendanceSerializer(
                 attendance_records,
@@ -687,32 +761,59 @@ class AttendanceApiView(APIView):
             )
 
             response_data = []
+            now = timezone.now()
 
             for attendance, serialized_record in zip(
                 attendance_records,
                 serializer.data
             ):
-                sessions = list(attendance.sessions.all())
+                sessions = list(
+                    attendance.sessions.all().order_by(
+                        "check_in_datetime"
+                    )
+                )
+
+                verified_sessions = [
+                    session for session in sessions
+                    if not session.is_auto_closed
+                ]
 
                 total_work_duration = timedelta(0)
                 time_logs = []
 
-                first_check_in = None
-                last_check_out = None
+                day_end = timezone.make_aware(
+                    datetime.combine(
+                        attendance.date + timedelta(days=1),
+                        datetime.min.time()
+                    ),
+                    timezone.get_current_timezone()
+                )
 
-                now = timezone.localtime(timezone.now())
+                calculation_end = min(now, day_end)
+
+                first_check_in = None
+                last_actual_end = None
 
                 for session in sessions:
                     check_in = timezone.localtime(
                         session.check_in_datetime
                     )
 
-                    if first_check_in is None:
-                        first_check_in = check_in
-
                     check_out = None
+                    counted_as_working_time = not session.is_auto_closed
 
-                    if session.check_out_datetime:
+                    if session.is_auto_closed:
+                        session_duration = (
+                            session.check_out_datetime -
+                            session.check_in_datetime
+                            if session.check_out_datetime
+                            else timedelta(0)
+                        )
+
+                        session_status = "Auto Closed"
+                        clock_out_display = "OUT missing"
+
+                    elif session.check_out_datetime:
                         check_out = timezone.localtime(
                             session.check_out_datetime
                         )
@@ -722,58 +823,59 @@ class AttendanceApiView(APIView):
                             session.check_in_datetime
                         )
 
-                        total_work_duration += session_duration
-                        last_check_out = check_out
-
-                    else:
-                        # Include currently active session in live hours
-                        session_duration = (
-                            timezone.now() -
-                            session.check_in_datetime
+                        session_status = "Completed"
+                        clock_out_display = check_out.strftime(
+                            "%I:%M:%S %p"
                         )
 
+                    else:
+                        session_end = max(
+                            session.check_in_datetime,
+                            calculation_end
+                        )
+
+                        session_duration = (
+                            session_end - session.check_in_datetime
+                        )
+
+                        session_status = "Open"
+                        clock_out_display = "OUT missing"
+
+                    if counted_as_working_time:
                         total_work_duration += session_duration
 
-                        check_out = None
+                        if first_check_in is None:
+                            first_check_in = session.check_in_datetime
+
+                        if session.check_out_datetime:
+                            last_actual_end = session.check_out_datetime
+                        else:
+                            last_actual_end = max(
+                                session.check_in_datetime,
+                                calculation_end
+                            )
 
                     time_logs.append({
                         "session_id": session.id,
-                        "clock_in": check_in.strftime(
-                            "%I:%M:%S %p"
-                        ),
-                        "clock_out": (
-                            check_out.strftime("%I:%M:%S %p")
-                            if check_out else "OUT missing"
-                        ),
+                        "clock_in": check_in.strftime("%I:%M:%S %p"),
+                        "clock_out": clock_out_display,
                         "session_duration": str(session_duration),
-                        "session_status": (
-                            "Completed"
-                            if session.check_out_datetime
-                            else "Open"
-                        )
+                        "session_status": session_status,
+                        "counted_as_working_time": counted_as_working_time
                     })
 
-                if first_check_in:
-                    gross_end = (
-                        now if any(
-                            not s.check_out_datetime for s in sessions
-                        )
-                        else last_check_out
+                if first_check_in is not None and last_actual_end is not None:
+                    gross_duration = max(
+                        last_actual_end - first_check_in,
+                        timedelta(0)
                     )
-
-                    gross_duration = (
-                        gross_end - first_check_in
-                    ) if gross_end else timedelta(0)
-
                 else:
                     gross_duration = timedelta(0)
 
-                break_duration = (
-                    gross_duration - total_work_duration
+                break_duration = max(
+                    gross_duration - total_work_duration,
+                    timedelta(0)
                 )
-
-                if break_duration < timedelta(0):
-                    break_duration = timedelta(0)
 
                 mandatory_duration = timedelta(
                     hours=8,
@@ -809,7 +911,6 @@ class AttendanceApiView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        
     def post(self, request, *args, **kwargs):
         try:
             user = request.user

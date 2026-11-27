@@ -168,7 +168,7 @@ class AttendanceSession(models.Model):
     attendance = models.ForeignKey(Attendance, on_delete=models.CASCADE, related_name='sessions')
     check_in_datetime = models.DateTimeField()
     check_out_datetime = models.DateTimeField(null=True, blank=True)
-
+    is_auto_closed = models.BooleanField(default=False)
     check_in_latitude = models.DecimalField(
         max_digits=9, decimal_places=6, null=True, blank=True
     )
